@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Build and package output
+dist/
+output/
+coverage/
+artifacts/
+*.tgz
+
+# Local environments and secrets
+.env
+.env.*
+!.env.example
+.venv/
+.venv-*/
+
+# Logs, traces, and runtime files
+*.log
+*.trace
+*.trace.jsonl
+*.pid
+*.tsbuildinfo
+
+# Editor and OS files
+.idea/
+.vs/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini

@@ -1,0 +1,2 @@
+*.sh text eol=lf
+packaging/launcher/copilot-changelog text eol=lf

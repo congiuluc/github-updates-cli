@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="The complete Copilot Changelog CLI guide: installation, AI-reviewed PowerPoint decks, offline websites, recovery, and release automation.">
+  <meta name="theme-color" content="#faf9fc" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111017" media="(prefers-color-scheme: dark)">
+  <title>Documentation · Copilot Changelog CLI</title>
+  <link rel="icon" type="image/png" href="assets/copilot-icon.png">
+  <link rel="stylesheet" href="assets/docs.css">
+  <script>
+    (() => {
+      const override = new URLSearchParams(location.search).get("scoutTheme");
+      let saved;
+      try { saved = localStorage.getItem("copilot-docs-theme"); }
+      catch (error) { console.warn("Theme preference cannot be read; using the system theme.", error); }
+      const theme = ["light", "dark"].includes(override) ? override : saved;
+      if (["light", "dark"].includes(theme)) document.documentElement.dataset.theme = theme;
+    })();
+  </script>
+  <script src="assets/docs.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#overview">
+        <img src="assets/copilot-icon.png" width="36" height="36" alt="">
+        <span>Copilot Changelog <span class="brand-label">CLI</span></span>
+      </a>
+      <div class="topbar-actions">
+        <span class="docs-label">Documentation</span>
+        <button id="theme-toggle" class="quiet-button" type="button" hidden>Theme</button>
+        <a class="source-link" href="https://github.com/congiuluc/GitHub-Updates-CLI">GitHub <span aria-hidden="true">↗</span></a>
+      </div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <details id="contents" open>
+        <summary>On this page <span aria-hidden="true">↕</span></summary>
+        <div class="search-box" id="search-box" hidden>
+          <label for="docs-search">Search documentation</label>
+          <input id="docs-search" name="q" type="search" placeholder="Search topics or options…" autocomplete="off" spellcheck="false">
+          <p class="search-hint">Press <kbd>/</kbd> to search. <kbd>Esc</kbd> to clear.</p>
+          <p id="search-status" role="status" class="search-status"></p>
+          <ul id="search-results" class="search-results" aria-label="Search results" hidden></ul>
+        </div>
+        <nav id="docs-nav" aria-label="Documentation sections">
+          <p class="nav-group">Get started</p>
+          <a href="#overview" aria-current="location">Overview</a>
+          <a href="#install">Installation</a>
+          <a href="#usage">Quick start</a>
+          <p class="nav-group">Guides</p>
+          <a href="#sources">Sources &amp; collection</a>
+          <a href="#presentation">Presentation design</a>
+          <a href="#review">AI review &amp; corrections</a>
+          <a href="#outputs">Outputs &amp; trace logs</a>
+          <a href="#resume">Resume &amp; recovery</a>
+          <p class="nav-group">Reference</p>
+          <a href="#cli-reference">CLI options</a>
+          <a href="#timeouts">Timeouts &amp; performance</a>
+          <a href="#updates">Version &amp; updates</a>
+          <a href="#troubleshooting">Troubleshooting</a>
+          <p class="nav-group">Build &amp; publish</p>
+          <a href="#development">Development</a>
+          <a href="#packaging">Packaging</a>
+          <a href="#release">CI &amp; releases</a>
+          <a href="#github-pages">Publish GitHub Pages</a>
+          <a href="#security">Security &amp; signing</a>
+        </nav>
+      </details>
+      <p class="sidebar-note">Built with the GitHub Copilot SDK.<br>No documentation build step.</p>
+    </aside>
+
+    <main id="main" tabindex="-1">
+      <section id="overview" class="doc-section hero" aria-labelledby="overview-title">
+        <p class="eyebrow">The complete guide <span class="tag">Windows · Linux · macOS</span></p>
+        <h1 id="overview-title">The changelog.<br><span>Ready to present.</span></h1>
+        <p class="lead">Turn GitHub Copilot updates into a structured PowerPoint briefing. Choose a date range, get AI-edited slides with speaker notes, and add an offline website when you need a searchable digest.</p>
+        <div class="actions">
+          <a class="button primary" href="#install">Get started <span aria-hidden="true">→</span></a>
+          <a class="button" href="#cli-reference">Explore the CLI</a>
+        </div>
+        <div id="features" class="feature-grid">
+          <a class="feature" href="#presentation"><span class="feature-number">01 / PRESENT</span><h2>Made for a briefing</h2><p>Section-aware slides, source links, and English or Italian speaker notes.</p></a>
+          <a class="feature" href="#review"><span class="feature-number">02 / REVIEW</span><h2>Corrections with context</h2><p>Validation errors go back to Copilot. Facts are rewritten, not cut to fit.</p></a>
+          <a class="feature" href="#resume"><span class="feature-number">03 / RECOVER</span><h2>Keep the accepted work</h2><p>Retry omitted slides without regenerating the articles already completed.</p></a>
+        </div>
+        <div class="code-block">
+          <div class="code-heading"><span>Your first briefing</span></div>
+          <pre><code>copilot-changelog --from 2026-08-01 --to 2026-08-31</code></pre>
+        </div>
+        <p class="muted small">An independent CLI built with the GitHub Copilot SDK. GitHub and Copilot are trademarks of GitHub, Inc.</p>
+      </section>
+
+      <section id="install" class="doc-section" aria-labelledby="install-title">
+        <p class="eyebrow">Get started / 01</p>
+        <h2 id="install-title">Install your way</h2>
+        <p>Release packages include Node.js. For source and npm installations, use <strong>Node.js 22.12+ on the 22.x line, 24.x, or 26+</strong>. Node.js 20 is not supported.</p>
+        <div class="table-scroll" role="region" aria-label="Platform downloads" tabindex="0">
+          <table><caption>Self-contained release packages</caption><thead><tr><th scope="col">Platform</th><th scope="col">Installer</th><th scope="col">Portable</th><th scope="col">Architecture</th></tr></thead><tbody>
+            <tr><th scope="row">Windows</th><td><code>*-setup.exe</code></td><td><code>*-win-x64.zip</code></td><td>x64</td></tr>
+            <tr><th scope="row">Debian / Ubuntu</th><td><code>*.deb</code></td><td><code>*-linux-*.tar.gz</code></td><td>x64, ARM64</td></tr>
+            <tr><th scope="row">macOS</th><td><code>*.pkg</code></td><td><code>*-darwin-*.tar.gz</code></td><td>Intel, Apple Silicon</td></tr>
+          </tbody></table>
+        </div>
+        <p><a href="https://github.com/congiuluc/GitHub-Updates-CLI/releases/latest">Download a published release <span aria-hidden="true">↗</span></a></p>
+        <div class="callout"><strong>Before the first release</strong><p>If the release or npm package has not been published yet, install from a local checkout instead. A documentation deployment does not publish the CLI.</p></div>
+        <h3>From npm</h3>
+        <div class="code-block"><div class="code-heading"><span>After the package is published</span></div><pre><code>npm install --global copilot-changelog-cli
+copilot-changelog --help</code></pre></div>
+        <h3>From a local checkout</h3>
+        <div class="code-block"><div class="code-heading"><span>Run in the repository root</span></div><pre><code>npm ci
+npm run build
+npm install --global .</code></pre></div>
+        <p>On Windows, open a new terminal after installation if the command is not on <code>PATH</code>. Windows binaries, the installer, the Start Menu shortcut, and the installed-app entry use the Copilot icon. Terminal-tab icons are controlled by the terminal profile.</p>
+        <h3>Authenticate for AI enrichment</h3>
+        <p>You need an account with access to GitHub Copilot and an authenticated Copilot CLI/SDK environment. Authenticate the GitHub CLI when needed:</p>
+        <div class="code-block"><div class="code-heading"><span>GitHub CLI</span></div><pre><code>gh auth login
+gh auth refresh --scopes copilot</code></pre></div>
+        <p><code>--no-ai</code> uses deterministic templates for testing; it does not generate AI-edited content. See <a href="#troubleshooting">troubleshooting</a> if your selected model is unavailable.</p>
+      </section>
+
+      <section id="usage" class="doc-section" aria-labelledby="usage-title">
+        <p class="eyebrow">Get started / 02</p>
+        <h2 id="usage-title">A briefing in one command</h2>
+        <p>By default, the CLI creates an English PowerPoint with English speaker notes. The newest matching articles in the selected period are processed first.</p>
+        <div class="code-block"><div class="code-heading"><span>English presentation</span></div><pre><code>copilot-changelog --from 2026-08-01 --to 2026-08-31</code></pre></div>
+        <h3>Italian slides, bilingual notes, and a website</h3>
+        <div class="code-block"><div class="code-heading"><span>Works in PowerShell, Bash, and Zsh</span></div><pre><code>copilot-changelog --from 2026-08-01 --to 2026-08-31 --slides-language it --speaker-notes-languages en,it --website</code></pre></div>
+        <h3>Try a smaller selection</h3>
+        <div class="code-block"><div class="code-heading"><span>Five newest matching entries</span></div><pre><code>copilot-changelog --from 2026-08-01 --to 2026-08-31 --limit 5 --output output-demo</code></pre></div>
+        <p>Every invocation prints the installed version and performs a short release check. Interactive terminals show a Copilot-themed banner; <code>NO_COLOR</code> disables color. Redirected output stays script-friendly, with progress on stderr and generated file paths on stdout.</p>
+        <p>The startup release check has a three-second deadline, including the response body. A failed check does not prevent generation.</p>
+      </section>
+
+      <section id="sources" class="doc-section" aria-labelledby="sources-title">
+        <p class="eyebrow">Guides / Collection</p>
+        <h2 id="sources-title">Two sources. One selection.</h2>
+        <p>The default collector combines the <a href="https://github.blog/changelog/?label=copilot">GitHub Copilot changelog</a> with every <strong>AI &amp; ML</strong> GitHub Blog article in the date range. It does not limit blog articles to titles containing “Copilot.”</p>
+        <ol class="steps">
+          <li><strong>Discover.</strong> Query each historical month with <code>opened-months=MM-YYYY</code> and paginate the blog API.</li>
+          <li><strong>Select.</strong> Merge sources, deduplicate URLs, sort newest-first, then apply the global <code>--limit</code>.</li>
+          <li><strong>Prepare.</strong> Download all selected source articles before starting AI enrichment. Unreadable or empty selected content stops the run with a diagnostic.</li>
+        </ol>
+        <p>Five continuously replenished download slots prepare source pages. News indexes are cached for five minutes and article pages for 24 hours under <code>copilot-changelog-cli/news-v1</code> in the operating system's temporary directory. Fresh cache entries avoid repeat downloads; invalid cache records are refreshed.</p>
+        <h3>Use a custom feed</h3>
+        <p><code>--feed</code> replaces both default sources with an RSS URL or local XML file. Feed entries are date-filtered and URL-deduplicated; selected entries must contain readable article text.</p>
+        <div class="code-block"><div class="code-heading"><span>Deterministic repository fixture</span></div><pre><code>npm run dev -- --from 2026-08-01 --to 2026-08-31 --feed test/fixtures/feed.xml --no-ai</code></pre></div>
+      </section>
+
+      <section id="presentation" class="doc-section" aria-labelledby="presentation-title">
+        <p class="eyebrow">Guides / Output design</p>
+        <h2 id="presentation-title">Structured for the audience</h2>
+        <p>A deck contains an opening slide, section dividers, and a visual title plus a detail slide for each accepted article. Images preserve their aspect ratio. Source links, publication dates, the Copilot mark, and localized speaker notes keep the briefing grounded.</p>
+        <figure class="deck-preview">
+          <div class="preview-cover">
+            <span class="preview-kicker">GitHub Copilot / Changelog</span>
+            <strong>What changed<br>in Copilot?</strong>
+            <span class="preview-period">Your selected reference period</span>
+            <img src="assets/copilot-icon.png" alt="" width="88" height="88" loading="lazy">
+          </div>
+          <div class="preview-detail">
+            <span class="preview-kicker">IDE / Update details</span><strong>One update. Four clear answers.</strong>
+            <div class="preview-cards"><span><b>Feature</b>What is new</span><span><b>Availability</b>Who can use it</span><span><b>Capabilities</b>What it changes</span><span><b>How to use it</b>Where to start</span></div>
+          </div>
+          <figcaption>Illustrative layout. The CLI generates real slide content from the selected sources.</figcaption>
+        </figure>
+        <div class="table-scroll" role="region" aria-label="Slide section content" tabindex="0">
+          <table><caption>Section-specific detail cards</caption><thead><tr><th scope="col">Section</th><th scope="col">When it applies</th><th scope="col">Cards</th></tr></thead><tbody>
+            <tr><th scope="row">Models</th><td>Newly available models, not settings, policies, pricing, or model pickers.</td><td>Model name · Availability · Key capabilities · When to use / avoid</td></tr>
+            <tr><th scope="row">Enterprise Admins</th><td>Enterprise owner/admin settings in the GitHub web portal or management console. Generic member features and API/CLI-only administration stay in their topic section.</td><td>Announcement · Availability · Impact · Audience</td></tr>
+            <tr><th scope="row">Announcements</th><td>Broader product, workflow, and adoption changes.</td><td>Announcement · Availability · Impact · Audience</td></tr>
+            <tr><th scope="row">IDE</th><td>Changes in supported editors.</td><td>Feature · Availability · Key capabilities · How to use</td></tr>
+            <tr><th scope="row">Retirements</th><td>Deprecations, removals, and migrations.</td><td>Subject · Retirement date · Reasons · Replacement</td></tr>
+          </tbody></table>
+        </div>
+        <p>Models, IDE, and Retirements use equal-width cards. Announcements and Enterprise Admins give the main explanation and impact cards a wider left column, with availability and audience on the right.</p>
+        <h3>Content budgets</h3>
+        <ul>
+          <li><strong>Summary:</strong> one complete sentence, at most 32 words / 220 characters, leading with the product or capability.</li>
+          <li><strong>Notes:</strong> 2–4 standalone bullets, each at most 16 words / 110 characters.</li>
+          <li><strong>Explanatory cards:</strong> target 28–34 words; at most 36 words / 250 characters for capabilities, usage guidance, reasons, and replacement.</li>
+          <li><strong>Wide announcement/impact cards:</strong> up to 44 words / 300 characters. Announcement prompts target 30–40 words.</li>
+          <li><strong>Compact labels:</strong> up to 18 words / 130 characters. Availability, retirement date, and audience use up to 26 words / 170 characters.</li>
+          <li><strong>Speaker notes:</strong> an 80–140 word presenter script for every requested language on AI-enriched article slides.</li>
+        </ul>
+        <p>Each card should contribute a distinct fact: a concrete change, mechanism, practical effect, action, or essential qualifier. Short sources are not padded with invented information. Up to three semicolon-separated points are allowed; commas inside model names or qualifiers do not count as separate points.</p>
+      </section>
+
+      <section id="review" class="doc-section" aria-labelledby="review-title">
+        <p class="eyebrow">Guides / AI quality</p>
+        <h2 id="review-title">Review that tells the model what failed</h2>
+        <p>The source determines the required section. Copilot receives the article and section-specific instructions, with examples encouraging concrete explanations rather than vague benefit statements.</p>
+        <ol class="steps">
+          <li><strong>Generate and validate.</strong> The initial response is checked for structure, required fields, presentation limits, and requested notes.</li>
+          <li><strong>Correct with feedback.</strong> Up to three corrective rewrites receive the exact validation errors. Prompts preserve valid fields, exceptions, eligibility, deadlines, and prerequisites.</li>
+          <li><strong>Request a final review.</strong> After four invalid enrichment attempts, a separate tool-disabled reviewer receives the rejected response, validator errors, and original source-grounded task.</li>
+          <li><strong>Continue when content is still invalid.</strong> Omit the article's slides with a warning, process later articles, and keep accepted work in the checkpoint for <a href="#resume">resume</a>.</li>
+        </ol>
+        <div class="callout"><strong>No mechanical trimming</strong><p>AI-generated fields are rewritten, not truncated, and extra bullets are not silently dropped. The model is asked to remove repetition before removing source-backed explanations.</p></div>
+        <p>Transient SDK failures share the bounded attempt budget. Timeouts are not retried automatically. Empty primary or reviewer responses, service failures, and trace-write errors remain explicit failures rather than being treated as content-review rejections.</p>
+        <p>These checks validate presentation content and formatting; they are not an independent factual audit. Review generated slides before sharing them with an audience.</p>
+      </section>
+
+      <section id="outputs" class="doc-section" aria-labelledby="outputs-title">
+        <p class="eyebrow">Guides / Files &amp; diagnostics</p>
+        <h2 id="outputs-title">Know what gets written</h2>
+        <div class="code-block"><div class="code-heading"><span>Example output directory</span></div><pre><code>output/
+  copilot-changelog-2026-08-01-to-2026-08-31.pptx
+  copilot-changelog-2026-08-01-to-2026-08-31.trace.jsonl
+  copilot-changelog-2026-08-01-to-2026-08-31.html  # with --website</code></pre></div>
+        <p>Different date ranges have different filenames. Re-running the <em>same</em> range rewrites its deck and requested website; choose another <code>--output</code> directory to preserve an earlier version.</p>
+        <p>The optional website embeds article images and provides local search. It is a generated digest, separate from this GitHub Pages documentation site. Slide and note languages are independently selectable; the digest's interface labels remain English.</p>
+        <h3>Trace logs</h3>
+        <p>The JSONL trace is appended on each run with a unique <code>runId</code>. It records source preparation, prompts, raw AI responses, validation, checkpoint activity, skipped articles, and failures. Its path is printed at startup and included in error messages.</p>
+        <div class="code-block"><div class="code-heading"><span>Mirror trace events to stderr</span></div><pre><code>copilot-changelog --from 2026-08-01 --to 2026-08-31 --verbose</code></pre></div>
+        <div class="callout warning"><strong>Review logs before sharing</strong><p>Trace files and verbose terminal output include source excerpts, full prompts, and generated text. Without <code>--verbose</code>, the trace file is still written.</p></div>
+      </section>
+
+      <section id="resume" class="doc-section" aria-labelledby="resume-title">
+        <p class="eyebrow">Guides / Recovery</p>
+        <h2 id="resume-title">Continue, don't start over</h2>
+        <p>A hidden checkpoint is saved after each successfully enriched article. If a slide still fails review, later articles continue and the CLI writes a partial deck. The rejected article remains pending.</p>
+        <div class="code-block"><div class="code-heading"><span>Retry pending articles with the same configuration</span></div><pre><code>copilot-changelog --from 2026-08-01 --to 2026-08-31 --resume</code></pre></div>
+        <p>Resume reuses accepted articles, retries missing ones, and rewrites the deck with recovered slides. Add <code>--website</code> again if you also want to update the digest. The checkpoint is removed only after all selected articles complete and every requested output is written.</p>
+        <h3>Interactive versus automated runs</h3>
+        <p>An interactive terminal asks <code>Previous run found (7/12 entries completed). Resume or restart? [R/s]:</code>. Enter or <code>R</code> resumes; <code>S</code> discards the checkpoint. Scripts and CI must explicitly choose <code>--resume</code> or <code>--restart</code>.</p>
+        <div class="code-block"><div class="code-heading"><span>Discard progress and regenerate all selected content</span></div><pre><code>copilot-changelog --from 2026-08-01 --to 2026-08-31 --restart</code></pre></div>
+        <h3>Compatibility and locks</h3>
+        <ul>
+          <li>Checkpoints match selected article URLs, model, AI mode, languages, and content format version. An incompatible checkpoint is discarded with a message.</li>
+          <li>Changing concurrency or request timeout does not invalidate a compatible checkpoint. Layout changes can reuse accepted text; use restart to request new AI text.</li>
+          <li>Malformed checkpoints are preserved and reported on resume. Restart discards them without parsing.</li>
+          <li>A per-deck <code>.lock</code> blocks competing processes for the same output directory and date range. Restart does not override an active lock.</li>
+        </ul>
+        <div class="callout warning"><strong>After a forced termination</strong><p>Confirm that no run is still active, remove only the reported stale lock, and resume. Do not delete the checkpoint. Locks are released automatically after normal completion or handled errors.</p></div>
+      </section>
+
+      <section id="cli-reference" class="doc-section" aria-labelledby="cli-title">
+        <p class="eyebrow">Reference / Commands</p>
+        <h2 id="cli-title">Every option, in one place</h2>
+        <p>Dates use <code>YYYY-MM-DD</code>; the end date includes the whole UTC day. Numeric options require whole numbers without trailing text. <code>--resume</code> and <code>--restart</code> cannot be combined.</p>
+        <div class="table-scroll" role="region" aria-label="CLI generation options" tabindex="0">
+          <table><caption>Generation options</caption><thead><tr><th scope="col">Option</th><th scope="col">Behavior</th><th scope="col">Default</th></tr></thead><tbody>
+            <tr><th scope="row"><code>--from &lt;date&gt;</code></th><td>First publication date in the selected period.</td><td>One month ago</td></tr>
+            <tr><th scope="row"><code>--to &lt;date&gt;</code></th><td>Last publication date, inclusive.</td><td>Today</td></tr>
+            <tr><th scope="row"><code>-o, --output &lt;directory&gt;</code></th><td>Directory for outputs, trace, checkpoint, and lock.</td><td><code>output</code></td></tr>
+            <tr><th scope="row"><code>-m, --model &lt;model&gt;</code></th><td>Available Copilot model ID or display name.</td><td><code>auto</code></td></tr>
+            <tr><th scope="row"><code>--limit &lt;count&gt;</code></th><td>Positive maximum number of newest matching articles.</td><td>Unlimited</td></tr>
+            <tr><th scope="row"><code>--feed &lt;url-or-file&gt;</code></th><td>RSS URL or local fixture; replaces both default sources.</td><td>Changelog + AI &amp; ML blog</td></tr>
+            <tr><th scope="row"><code>--slides-language &lt;language&gt;</code></th><td>Slide content language: <code>en</code> or <code>it</code>.</td><td><code>en</code></td></tr>
+            <tr><th scope="row"><code>--speaker-notes-languages &lt;languages&gt;</code></th><td>Comma-separated script languages: <code>en</code>, <code>it</code>, or <code>en,it</code>.</td><td><code>en</code></td></tr>
+            <tr><th scope="row"><code>--website</code></th><td>Also generate the self-contained HTML digest.</td><td>Disabled</td></tr>
+            <tr><th scope="row"><code>--resume</code></th><td>Reuse compatible completed content without prompting.</td><td>Disabled</td></tr>
+            <tr><th scope="row"><code>--restart</code></th><td>Discard saved progress without prompting.</td><td>Disabled</td></tr>
+            <tr><th scope="row"><code>--concurrency &lt;count&gt;</code></th><td>Simultaneous article workers, from 1 to 8.</td><td><code>1</code></td></tr>
+            <tr><th scope="row"><code>--request-timeout &lt;seconds&gt;</code></th><td>Separate deadline for each response or initialization operation. Positive whole seconds, up to 2147483.</td><td><code>180</code></td></tr>
+            <tr><th scope="row"><code>--no-ai</code></th><td>Use deterministic templates rather than Copilot enrichment.</td><td>AI enabled</td></tr>
+            <tr><th scope="row"><code>--verbose</code></th><td>Stream trace events, including prompts and responses, to stderr.</td><td>Disabled</td></tr>
+            <tr><th scope="row"><code>-V, --version</code></th><td>Print installed version and exit.</td><td>—</td></tr>
+            <tr><th scope="row"><code>-h, --help</code></th><td>Print command help and exit.</td><td>—</td></tr>
+          </tbody></table>
+        </div>
+        <div class="table-scroll" role="region" aria-label="CLI management commands" tabindex="0">
+          <table><caption>Management commands</caption><thead><tr><th scope="col">Command</th><th scope="col">Behavior</th></tr></thead><tbody>
+            <tr><th scope="row"><code>copilot-changelog version</code></th><td>Print the installed CLI version.</td></tr>
+            <tr><th scope="row"><code>copilot-changelog update --check</code></th><td>Check GitHub Releases without installing.</td></tr>
+            <tr><th scope="row"><code>copilot-changelog update</code></th><td>Verify and install the latest compatible release.</td></tr>
+            <tr><th scope="row"><code>copilot-changelog update --help</code></th><td>Show update-command help.</td></tr>
+          </tbody></table>
+        </div>
+      </section>
+
+      <section id="timeouts" class="doc-section" aria-labelledby="timeouts-title">
+        <p class="eyebrow">Reference / Runtime</p>
+        <h2 id="timeouts-title">Predictable work, bounded waits</h2>
+        <p>Sequential enrichment is the default: one shared client, one fresh session per article. Use <code>--concurrency 2</code> through <code>8</code> only when your Copilot environment supports the load. Corrective prompts stay associated with their source; results retain changelog order within each section.</p>
+        <p>The 180-second deadline applies separately to each response, runtime startup, model discovery, and primary or reviewer session creation. Timeouts stop new articles and retries. Active peers may complete and be checkpointed before runtime shutdown.</p>
+        <div class="code-block"><div class="code-heading"><span>Resume with less contention</span></div><pre><code>copilot-changelog --from 2026-08-01 --to 2026-08-31 --resume --concurrency 1 --request-timeout 180</code></pre></div>
+        <p>Increasing the timeout permits slower responses; it does not speed up inference. Abort/disconnect and shutdown have bounded cleanup waits. Both sessions are cleaned up even if one cleanup fails, and cleanup diagnostics are reported alongside the original error. A forced SDK stop is attempted if graceful shutdown fails.</p>
+        <p>Source downloads remain parallel. Help and version commands avoid loading generation dependencies, and the SDK is imported only when AI is needed. Sessions have no tools available because the source is supplied. PowerPoint theme changes happen in memory before the final write.</p>
+      </section>
+
+      <section id="updates" class="doc-section" aria-labelledby="updates-title">
+        <p class="eyebrow">Reference / Maintenance</p>
+        <h2 id="updates-title">Keep the CLI current</h2>
+        <div class="code-block"><div class="code-heading"><span>Check, then update</span></div><pre><code>copilot-changelog --version
+copilot-changelog update --check
+copilot-changelog update</code></pre></div>
+        <p>Updates require a published GitHub release. Release lookup allows 30 seconds; each asset download allows five minutes. Downloaded release assets are verified against <code>SHA256SUMS</code>.</p>
+        <ul>
+          <li><strong>npm:</strong> installs the new version with <code>npm install --global</code>; that version must also be published to npm.</li>
+          <li><strong>Windows setup:</strong> launches the new installer after the current process exits.</li>
+          <li><strong>Debian / macOS packages:</strong> invoke <code>sudo dpkg -i</code> or <code>sudo installer</code>; administrator credentials may be required.</li>
+          <li><strong>Portable:</strong> stages and replaces the managed application, runtime, launcher, and README after exit. Old dependency directories are not merged. Rollback restores the previous files after a failed replacement; user output outside managed paths is preserved.</li>
+        </ul>
+        <p>Close other running copies first. Inspect <code>.copilot-changelog-update.log</code> in the installation directory for the result. Competing updaters are blocked by <code>.copilot-changelog-update.lock</code>.</p>
+        <div class="callout warning"><strong>Interrupted portable update</strong><p>Confirm that no updater is active. Inspect the logged backup location and restore retained managed files if needed before removing the stale update lock. Do not delete recovery backups blindly.</p></div>
+      </section>
+
+      <section id="troubleshooting" class="doc-section" aria-labelledby="troubleshooting-title">
+        <p class="eyebrow">Reference / Help</p>
+        <h2 id="troubleshooting-title">When a run needs attention</h2>
+        <details class="faq"><summary>A slide was omitted after review</summary><p>The remaining accepted content is still written. Re-run the same dates, model, feed selection, and language settings with <code>--resume</code>. The rejected article is retried; accepted text is reused.</p></details>
+        <details class="faq"><summary>Authentication, model, or request failure</summary><p>Verify Copilot access and authentication. Check the reported model availability, reduce concurrency to 1, and resume. Changing the model makes the existing checkpoint incompatible; keep it unchanged if you need to preserve completed AI work.</p></details>
+        <details class="faq"><summary>Source preparation failed</summary><p>Every selected article must be readable before enrichment starts. Check the URL, feed content, and internet connection. Downloaded articles remain cached. If the diagnostic identifies an unreadable cache directory, repair its permissions or remove that specific cache after reviewing the error.</p></details>
+        <details class="faq"><summary>A run lock or damaged checkpoint remains</summary><p>For a lock, confirm the original process has stopped before removing only the reported lock file. A damaged checkpoint is preserved on resume; <code>--restart</code> discards it. Neither option bypasses an active run lock.</p></details>
+        <details class="faq"><summary>The CLI is not found on Windows</summary><p>Open a new terminal after installing so the updated PATH is loaded. For a portable package, invoke the launcher from its extracted directory or add that directory to PATH.</p></details>
+        <details class="faq"><summary>Badges, documentation, or download links return 404</summary><p>The repository must be accessible and pushed, workflows must have run, and downloads require a release. Enable GitHub Pages with GitHub Actions as its source. See <a href="#github-pages">the publishing checklist</a>; local files alone do not create a public site.</p></details>
+        <details class="faq"><summary>Trace or output writing failed</summary><p>Check directory permissions, available disk space, and whether the presentation is open in another application. Fix the filesystem problem and resume. Do not share the trace without reviewing its prompts and source content.</p></details>
+      </section>
+
+      <section id="development" class="doc-section" aria-labelledby="development-title">
+        <p class="eyebrow">Build &amp; publish / Development</p>
+        <h2 id="development-title">Work from source</h2>
+        <div class="code-block"><div class="code-heading"><span>Install and validate</span></div><pre><code>npm ci
+npm run typecheck
+npm test
+npm run build</code></pre></div>
+        <div class="code-block"><div class="code-heading"><span>Run TypeScript directly</span></div><pre><code>npm run dev -- --from 2026-08-01 --to 2026-08-31</code></pre></div>
+        <div class="code-block"><div class="code-heading"><span>Repository map</span></div><pre><code>src/                  CLI, collector, enrichment, HTML and PowerPoint
+assets/               Runtime artwork and Windows icon
+packaging/            Platform packaging scripts and launchers
+docs/                 This static GitHub Pages site
+.github/workflows/    CI, documentation, and releases
+test/fixtures/        Deterministic source inputs</code></pre></div>
+        <p>Keep generated output, dependencies, and packaging artifacts out of commits. The documentation is plain HTML, CSS, and JavaScript: no framework install or site build is required. Local search stays in your browser and sends no queries to a service.</p>
+      </section>
+
+      <section id="packaging" class="doc-section" aria-labelledby="packaging-title">
+        <p class="eyebrow">Build &amp; publish / Distribution</p>
+        <h2 id="packaging-title">Package the tested dependency tree</h2>
+        <p>Platform packages contain the application, production dependencies, and a bundled Node.js runtime. Scripts copy the manifest and lockfile into staging and run <code>npm ci --omit=dev</code>. Windows and Unix packages smoke-test the runtime, launcher, and SDK.</p>
+        <p><code>npm pack</code> bundles the validated presentation dependency subtree so npm consumers receive the patched image parser. Prepack adjusts that bundled manifest; postpack restores the original installed manifest. Run <code>npm ci</code> before packing. If interrupted after preparation, run <code>npm run postpack</code> before retrying.</p>
+        <h3>Windows x64</h3>
+        <p>Requires Inno Setup 6. The multi-resolution Copilot icon (16–256 pixels) is embedded in the launcher and installer, and used by shortcuts and the installed-app entry.</p>
+        <div class="code-block"><div class="code-heading"><span>PowerShell</span></div><pre><code>winget install --id JRSoftware.InnoSetup --exact
+npm run build:windows</code></pre></div>
+        <p>Use <code>npm run build:portable</code> for just the portable package. <code>npm run build:installer</code> is an alias for the installer build.</p>
+        <h3>Linux</h3>
+        <p>Requires <code>curl</code>, <code>tar</code>, and <code>dpkg-deb</code>. Run the command matching your native Node.js architecture.</p>
+        <div class="code-block"><div class="code-heading"><span>On a matching Linux runner</span></div><pre><code>npm run build:linux -- x64
+# On an ARM64 runner instead:
+npm run build:linux -- arm64</code></pre></div>
+        <h3>macOS</h3>
+        <p>Requires the built-in <code>pkgbuild</code>. Unix packaging rejects cross-platform and cross-architecture builds before staging dependencies.</p>
+        <div class="code-block"><div class="code-heading"><span>On a matching macOS runner</span></div><pre><code>npm run build:macos -- arm64
+# On an Intel runner instead:
+npm run build:macos -- x64</code></pre></div>
+      </section>
+
+      <section id="release" class="doc-section" aria-labelledby="release-title">
+        <p class="eyebrow">Build &amp; publish / Automation</p>
+        <h2 id="release-title">From a tag to a release</h2>
+        <ul>
+          <li><a href="https://github.com/congiuluc/GitHub-Updates-CLI/blob/main/.github/workflows/ci.yml"><code>ci.yml</code></a> runs type-checks and tests on Windows, Linux, and macOS, including the minimum supported Node version.</li>
+          <li><a href="https://github.com/congiuluc/GitHub-Updates-CLI/blob/main/.github/workflows/pages.yml"><code>pages.yml</code></a> publishes this documentation independently of application releases.</li>
+          <li><a href="https://github.com/congiuluc/GitHub-Updates-CLI/blob/main/.github/workflows/release.yml"><code>release.yml</code></a> validates the version, builds native platform packages, generates <code>SHA256SUMS</code>, and publishes only after validation succeeds.</li>
+        </ul>
+        <p>Update the version in the manifest and lockfile, commit, then push a matching version tag. For example, if the package version is <code>1.0.0</code>:</p>
+        <div class="code-block"><div class="code-heading"><span>Publish a matching tag</span></div><pre><code>git tag v1.0.0
+git push origin v1.0.0</code></pre></div>
+        <p>The tag must equal <code>v</code> followed by the package version. Workflow dispatch can build packages without publishing a tag release. Publishing to npm is a separate operation; the release workflow does not run <code>npm publish</code>.</p>
+      </section>
+
+      <section id="github-pages" class="doc-section" aria-labelledby="pages-title">
+        <p class="eyebrow">Build &amp; publish / This site</p>
+        <h2 id="pages-title">Publish on GitHub Pages</h2>
+        <p>The repository already includes a GitHub Actions deployment workflow. No paid hosting, site generator, or additional runtime is required for this static site; GitHub Pages availability depends on your repository visibility and plan.</p>
+        <ol class="steps">
+          <li><strong>Connect the repository.</strong> Create or select your GitHub repository, configure its origin, and push the source to <code>main</code>.</li>
+          <li><strong>Enable Pages.</strong> Open <strong>Settings → Pages → Build and deployment</strong> and choose <strong>GitHub Actions</strong> as the source. Ensure repository Actions are enabled.</li>
+          <li><strong>Deploy.</strong> Push a change under <code>docs/</code>, or open <strong>Actions → Deploy documentation → Run workflow</strong> on <code>main</code>.</li>
+          <li><strong>Verify.</strong> Wait for the deployment to succeed, then open the URL in the <code>github-pages</code> environment. No release tag is needed.</li>
+        </ol>
+        <div class="callout"><strong>Configured site address</strong><p><a href="https://congiuluc.github.io/GitHub-Updates-CLI/">https://congiuluc.github.io/GitHub-Updates-CLI/</a></p><p>The address will return 404 until the repository is accessible and the first deployment succeeds. The README status badges also need their workflows to run.</p></div>
+        <h3>Using a different repository name or owner</h3>
+        <p>Update repository, homepage, and bug-report metadata in <code>package.json</code>; the repository constant in <code>src/updater.ts</code>; and repository/site URLs in the README and documentation. This site's stylesheet, script, images, and section links are relative, so it works beneath a project Pages subpath.</p>
+        <p>This website is documentation for the CLI. It is not the optional article digest created by <code>--website</code>, and deploying it does not publish a CLI release.</p>
+      </section>
+
+      <section id="security" class="doc-section" aria-labelledby="security-title">
+        <p class="eyebrow">Build &amp; publish / Trust</p>
+        <h2 id="security-title">Share deliberately</h2>
+        <p>Downloaded article images must be PNG, JPEG, or GIF, pass signature checks, and remain below the configured size limit. The transitive <code>image-size</code> dependency is overridden to patched version <code>2.0.4</code> while the presentation library requests its older 1.x line.</p>
+        <p>Keep tokens and signing credentials out of source control. Use encrypted GitHub Actions secrets for releases. Review generated content and <a href="#outputs">trace logs</a> before distributing them.</p>
+        <h3>Package signing</h3>
+        <p>Automation currently produces unsigned packages, which can trigger operating-system warnings. Before signed public distribution, configure:</p>
+        <ul><li>An Authenticode certificate for Windows.</li><li>A Developer ID Installer certificate and notarization for macOS.</li><li>Repository signing for a published Debian package repository.</li></ul>
+        <p>GitHub and Copilot names and marks identify the source service and generated changelog content. This project is not an official GitHub product.</p>
+      </section>
+
+      <footer class="page-footer">
+        <div><strong>Copilot Changelog CLI</strong><p>Source updates. Clear briefings.</p></div>
+        <a href="#overview">Back to top <span aria-hidden="true">↑</span></a>
+      </footer>
+    </main>
+  </div>
+  <p id="copy-status" class="toast" role="status"></p>
+</body>
+</html>

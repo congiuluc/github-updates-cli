@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title>GitHub Copilot changelog fixture</title>
+    <item>
+      <title>Copilot model controls arrive in the IDE</title>
+      <link>https://github.blog/changelog/2026-08-15-copilot-model-controls</link>
+      <pubDate>Sat, 15 Aug 2026 10:00:00 +0000</pubDate>
+      <description><![CDATA[<p>Developers can now select models directly in their editor.</p>]]></description>
+      <content:encoded><![CDATA[
+        <html><body>
+          <p>Developers can now select models directly in their editor.</p>
+          <p>The update makes model choice visible and easier to manage for each task.</p>
+          <p>Teams can document preferred models for common workflows.</p>
+          <a href="https://docs.github.com/copilot">GitHub Copilot documentation</a>
+        </body></html>
+      ]]></content:encoded>
+    </item>
+  </channel>
+</rss>

@@ -1,0 +1,149 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  verify-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.package.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: package
+        shell: bash
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$VERSION" ]]; then
+            echo "Tag $GITHUB_REF_NAME does not match package version v$VERSION." >&2
+            exit 1
+          fi
+
+  validate:
+    needs: verify-version
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: [24]
+        include:
+          - os: ubuntu-latest
+            node: 22.12.0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  windows:
+    needs: verify-version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Install Inno Setup
+        shell: powershell
+        run: choco install innosetup --yes --no-progress
+      - run: npm run build:windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-packages
+          path: |
+            artifacts/copilot-changelog-${{ needs.verify-version.outputs.version }}-win-x64.zip
+            artifacts/copilot-changelog-${{ needs.verify-version.outputs.version }}-setup.exe
+          if-no-files-found: error
+
+  linux:
+    needs: verify-version
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            os: ubuntu-24.04
+            deb_arch: amd64
+          - arch: arm64
+            os: ubuntu-24.04-arm
+            deb_arch: arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: bash ./packaging/build-linux.sh "${{ matrix.arch }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}-packages
+          path: |
+            artifacts/copilot-changelog-${{ needs.verify-version.outputs.version }}-linux-${{ matrix.arch }}.tar.gz
+            artifacts/copilot-changelog_${{ needs.verify-version.outputs.version }}_${{ matrix.deb_arch }}.deb
+          if-no-files-found: error
+
+  macos:
+    needs: verify-version
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            os: macos-15-intel
+          - arch: arm64
+            os: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: bash ./packaging/build-macos.sh "${{ matrix.arch }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}-packages
+          path: |
+            artifacts/copilot-changelog-${{ needs.verify-version.outputs.version }}-darwin-${{ matrix.arch }}.tar.gz
+            artifacts/copilot-changelog-${{ needs.verify-version.outputs.version }}-macos-${{ matrix.arch }}.pkg
+          if-no-files-found: error
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: [verify-version, validate, windows, linux, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Create checksums
+        working-directory: release-assets
+        run: sha256sum * > SHA256SUMS
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: release-assets
+        run: >-
+          gh release create "${GITHUB_REF_NAME}" ./*
+          --repo "${GITHUB_REPOSITORY}"
+          --verify-tag
+          --generate-notes
+          --title "Copilot Changelog CLI ${GITHUB_REF_NAME}"

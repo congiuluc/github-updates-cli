@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title>GitHub Copilot long-title fixture</title>
+    <item>
+      <title>GitHub Copilot model selection and policy controls arrive across supported IDE experiences</title>
+      <link>https://github.blog/changelog/2026-08-15-copilot-model-controls</link>
+      <pubDate>Sat, 15 Aug 2026 10:00:00 +0000</pubDate>
+      <description><![CDATA[<p>Developers can select approved models directly in their editor.</p>]]></description>
+      <content:encoded><![CDATA[
+        <html><body>
+          <p>Developers can select approved models directly in their editor while organizations control availability, plans, policies, preview access, and provider choices across several supported environments.</p>
+          <p>Teams can use the controls to standardize everyday coding tasks without reviewing every model, configuration option, rollout phase, and administrative setting in the release documentation.</p>
+          <p>The complete source also describes experimental options, individual IDE versions, policy prerequisites, navigation steps, and additional examples for administrators.</p>
+          <a href="https://docs.github.com/copilot">GitHub Copilot documentation</a>
+        </body></html>
+      ]]></content:encoded>
+    </item>
+  </channel>
+</rss>
