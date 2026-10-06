@@ -8,6 +8,16 @@ import { expect, test } from "vitest";
 const root = resolve(import.meta.dirname, "..");
 const read = (path: string) => readFile(join(root, path), "utf8");
 
+test("release package and lockfile declare the same version", async () => {
+  const [manifest, lockfile] = await Promise.all([
+    read("package.json"), read("package-lock.json"),
+  ]);
+  const { version } = JSON.parse(manifest);
+  const lock = JSON.parse(lockfile);
+  expect(lock.version).toBe(version);
+  expect(lock.packages[""].version).toBe(version);
+});
+
 test("Copilot icon includes transparent 32-bit PNG frames for standard Windows icon sizes", async () => {
   const icon = await readFile(join(root, "assets", "copilot.ico"));
   const sizes = [16, 24, 32, 48, 64, 128, 256];

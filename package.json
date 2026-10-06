@@ -1,6 +1,6 @@
 {
   "name": "copilot-changelog-cli",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "Generate Copilot-enriched presentations and offline websites from the GitHub Copilot changelog.",
   "homepage": "https://congiuluc.github.io/GitHub-Updates-CLI/",
   "repository": {
