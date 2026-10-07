@@ -86,6 +86,7 @@ async function fixture(expectedVersion?: string) {
       const path = join(stage, name);
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, value);
+      if (name === "runtime/node" && expectedVersion) await chmod(path, 0o755);
     }
     await exec("tar", ["-czf", archive, "-C", stage, "."]);
   }
