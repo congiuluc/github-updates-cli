@@ -256,6 +256,7 @@ test.each([".github/workflows/ci.yml", ".github/workflows/release.yml"])(
 
 test.each([
   ".github/workflows/ci.yml", ".github/workflows/release.yml", ".github/workflows/pages.yml",
+  ".github/workflows/distribute.yml",
   "examples/scheduled-briefing.yml",
 ])("%s uses maintained actions and explicit Ubuntu runners", async (path) => {
   const workflow = await read(path);

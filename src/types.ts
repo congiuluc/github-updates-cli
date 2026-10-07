@@ -10,6 +10,7 @@ export const sections = [
 ] as const;
 
 export type Section = (typeof sections)[number];
+export const DEFAULT_ENRICHMENT_CONCURRENCY = 3;
 /** A canonical BCP 47 tag. Validate untrusted values with normalizeLocale before use. */
 export type SupportedLanguage = string;
 export type SlideDetailKey =

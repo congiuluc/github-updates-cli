@@ -1,0 +1,228 @@
+name: Distribute release
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+      source-commit:
+        required: true
+        type: string
+    secrets:
+      WINGET_TOKEN:
+        required: false
+      SCOOP_TOKEN:
+        required: false
+      HOMEBREW_TOKEN:
+        required: false
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing published stable release tag (vX.Y.Z)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: distribution-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      commit: ${{ steps.release.outputs.commit }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: tooling
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: tooling/.node-version
+      - name: Verify the published release and immutable tag
+        id: release
+        working-directory: tooling
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          EXPECTED_COMMIT: ${{ inputs.source-commit }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { execFileSync } from "node:child_process";
+          import { appendFileSync, mkdirSync } from "node:fs";
+          import { stableVersion, assetNames } from "./packaging/distribution.mjs";
+          const tag = process.env.RELEASE_TAG;
+          const version = stableVersion(tag);
+          const commit = execFileSync("git", ["rev-parse", "--verify", `refs/tags/${tag}^{commit}`], { encoding: "utf8" }).trim();
+          if (process.env.EXPECTED_COMMIT && commit !== process.env.EXPECTED_COMMIT) {
+            throw new Error("The release tag moved after its source commit was resolved.");
+          }
+          const release = JSON.parse(execFileSync("gh", ["release", "view", tag, "--repo", process.env.GITHUB_REPOSITORY,
+            "--json", "tagName,isDraft,isPrerelease,assets"], { encoding: "utf8" }));
+          if (release.tagName !== tag || release.isDraft || release.isPrerelease) {
+            throw new Error("Distribution requires an existing, published stable release.");
+          }
+          const assets = new Set(release.assets.map(asset => asset.name));
+          const expected = ["SHA256SUMS", ...Object.values(assetNames(version))];
+          for (const name of expected) if (!assets.has(name)) throw new Error(`Release asset is missing: ${name}`);
+          mkdirSync("../release-assets");
+          execFileSync("gh", ["release", "download", tag, "--repo", process.env.GITHUB_REPOSITORY, "--dir", "../release-assets",
+            ...expected.flatMap(name => ["--pattern", name])], { stdio: "inherit" });
+          appendFileSync(process.env.GITHUB_OUTPUT, `commit=${commit}\nversion=${version}\n`);
+          NODE
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.release.outputs.commit }}
+          path: source
+          persist-credentials: false
+      - name: Stamp and pack the exact released npm source
+        working-directory: source
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          npm version "$RELEASE_VERSION" --no-git-tag-version --ignore-scripts --allow-same-version
+          npm ci
+          mkdir -p "$GITHUB_WORKSPACE/distribution"
+          npm pack --pack-destination "$GITHUB_WORKSPACE/distribution"
+      - name: Generate checksum-verified package definitions
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+          PACKAGE_ID: ${{ vars.WINGET_PACKAGE_ID || 'congiuluc.CopilotChangelog' }}
+        run: |
+          node tooling/packaging/distribution.mjs \
+            --tag "$RELEASE_TAG" --repository "$GITHUB_REPOSITORY" --commit "$RELEASE_COMMIT" \
+            --assets release-assets --output distribution --package-id "$PACKAGE_ID"
+          node --input-type=module <<'NODE'
+          import { createHash } from "node:crypto";
+          import { execFileSync } from "node:child_process";
+          import { readFileSync, writeFileSync } from "node:fs";
+          const path = "distribution/distribution.json";
+          const metadata = JSON.parse(readFileSync(path, "utf8"));
+          const tarball = `distribution/${metadata.npmPackage}-${metadata.version}.tgz`;
+          const packaged = JSON.parse(execFileSync("tar", ["-xOf", tarball, "package/package.json"], { encoding: "utf8" }));
+          if (packaged.name !== metadata.npmPackage || packaged.version !== metadata.version) {
+            throw new Error("Packed npm metadata does not match the released package.");
+          }
+          metadata.npmIntegrity = `sha512-${createHash("sha512").update(readFileSync(tarball)).digest("base64")}`;
+          writeFileSync(path, `${JSON.stringify(metadata, null, 2)}\n`);
+          NODE
+          ruby -c distribution/homebrew/Formula/copilot-changelog.rb
+      - uses: actions/upload-artifact@v7
+        with:
+          name: distribution-${{ inputs.tag }}
+          path: distribution/
+          if-no-files-found: error
+          retention-days: 30
+          overwrite: true
+      - name: Summarize opt-in publication
+        env:
+          NPM_ENABLED: ${{ vars.PUBLISH_NPM }}
+          WINGET_ENABLED: ${{ vars.PUBLISH_WINGET }}
+          SCOOP_ENABLED: ${{ vars.PUBLISH_SCOOP }}
+          HOMEBREW_ENABLED: ${{ vars.PUBLISH_HOMEBREW }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from "node:fs";
+          const channels = ["NPM", "WINGET", "SCOOP", "HOMEBREW"];
+          const lines = channels.map(name => `| ${name} | ${process.env[`${name}_ENABLED`] === "true" ? "Enabled; see publication job" : "Disabled; generated files are in the workflow artifact"} |`);
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+            "## Distribution prepared\n\n| Channel | Publication |\n|---|---|\n" + lines.join("\n") + "\n");
+          NODE
+
+  npm:
+    needs: prepare
+    if: vars.PUBLISH_NPM == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: tooling
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: tooling/.node-version
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@v8
+        with:
+          name: distribution-${{ inputs.tag }}
+          path: distribution
+      - name: Publish the prepared tarball using npm trusted publishing
+        working-directory: source
+        run: node ../tooling/packaging/npm-publication.mjs --directory ../distribution
+
+  registry-pr:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        channel: [winget, scoop, homebrew]
+    steps:
+      - name: Resolve channel opt-in and credentials
+        id: channel
+        env:
+          CHANNEL: ${{ matrix.channel }}
+          WINGET_ENABLED: ${{ vars.PUBLISH_WINGET }}
+          SCOOP_ENABLED: ${{ vars.PUBLISH_SCOOP }}
+          HOMEBREW_ENABLED: ${{ vars.PUBLISH_HOMEBREW }}
+          WINGET_REPOSITORY: ${{ vars.WINGET_FORK }}
+          SCOOP_REPOSITORY: ${{ vars.SCOOP_BUCKET }}
+          HOMEBREW_REPOSITORY: ${{ vars.HOMEBREW_TAP }}
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          SCOOP_TOKEN: ${{ secrets.SCOOP_TOKEN }}
+          HOMEBREW_TOKEN: ${{ secrets.HOMEBREW_TOKEN }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from "node:fs";
+          const channel = process.env.CHANNEL.toUpperCase();
+          const enabled = process.env[`${channel}_ENABLED`] === "true";
+          const repository = process.env[`${channel}_REPOSITORY`];
+          if (enabled && (!repository || !process.env[`${channel}_TOKEN`])) {
+            throw new Error(`${channel} is enabled but its repository or publication token is missing.`);
+          }
+          if (enabled && (!/^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(repository) || repository.trim() !== repository)) {
+            throw new Error(`Invalid ${channel} repository; expected owner/repo.`);
+          }
+          appendFileSync(process.env.GITHUB_OUTPUT, `enabled=${enabled}\nrepository=${enabled ? repository : ""}\n`);
+          if (!enabled) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${channel}: publication is disabled.\n`);
+          NODE
+      - uses: actions/checkout@v7
+        if: steps.channel.outputs.enabled == 'true'
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        if: steps.channel.outputs.enabled == 'true'
+        with:
+          node-version-file: .node-version
+      - uses: actions/download-artifact@v8
+        if: steps.channel.outputs.enabled == 'true'
+        with:
+          name: distribution-${{ inputs.tag }}
+          path: distribution
+      - name: Open or reuse the package review PR
+        if: steps.channel.outputs.enabled == 'true'
+        env:
+          CHANNEL: ${{ matrix.channel }}
+          PUBLICATION_REPOSITORY: ${{ steps.channel.outputs.repository }}
+          GH_TOKEN: ${{ matrix.channel == 'winget' && secrets.WINGET_TOKEN || matrix.channel == 'scoop' && secrets.SCOOP_TOKEN || secrets.HOMEBREW_TOKEN }}
+        run: |
+          node packaging/submit-distribution.mjs --directory distribution \
+            --channel "$CHANNEL" --repository "$PUBLICATION_REPOSITORY" >> "$GITHUB_STEP_SUMMARY"

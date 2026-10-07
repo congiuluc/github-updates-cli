@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, posix, win32 } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const repository = "congiuluc/github-updates-cli";
 const packageName = "copilot-changelog-cli";
@@ -19,16 +20,19 @@ interface GitHubRelease {
   assets: ReleaseAsset[];
 }
 
-export type InstallationType = "npm" | "windows-installer" | "linux-package" | "macos-package" | "portable";
+export type InstallationType = "npm" | "windows-installer" | "linux-package" | "macos-package" | "portable" | "scoop" | "homebrew" | "source";
 
 export interface UpdateEnvironment {
   platform: NodeJS.Platform;
   arch: string;
   execPath: string;
+  cliPath?: string;
 }
 
 export interface UpdateOptions {
   checkOnly?: boolean;
+  statusOnly?: boolean;
+  onProgress?: (message: string) => void;
   fetchImpl?: typeof fetch;
   environment?: UpdateEnvironment;
   /** Override HTTP deadlines, including bodies (defaults: lookup 30s, assets 5min). */
@@ -75,11 +79,20 @@ export function detectInstallation(environment: UpdateEnvironment): {
 } {
   const platformPath = environment.platform === "win32" ? win32 : posix;
   if (platformPath.basename(platformPath.dirname(environment.execPath)).toLowerCase() !== "runtime") {
+    if (environment.cliPath && !environment.cliPath.replaceAll("\\", "/").toLowerCase().includes("/node_modules/copilot-changelog-cli/")) {
+      return { type: "source" };
+    }
     return { type: "npm" };
   }
 
   const root = platformPath.resolve(platformPath.dirname(environment.execPath), "..");
   const normalized = root.replaceAll("\\", "/").toLowerCase();
+  if (environment.platform === "win32" && /\/apps\/copilot-changelog\/[^/]+$/.test(normalized)) {
+    return { type: "scoop", root };
+  }
+  if (environment.platform !== "win32" && /\/cellar\/copilot-changelog\/[^/]+\/libexec$/.test(normalized)) {
+    return { type: "homebrew", root };
+  }
   if (environment.platform === "win32" && normalized.endsWith("/programs/copilot changelog cli")) {
     return { type: "windows-installer", root };
   }
@@ -98,7 +111,7 @@ export function selectAssetName(
   platform: NodeJS.Platform,
   arch: string,
 ): string | undefined {
-  if (installation === "npm") return undefined;
+  if (installation === "npm" || installation === "scoop" || installation === "homebrew" || installation === "source") return undefined;
   if (platform === "win32") {
     return installation === "windows-installer"
       ? `copilot-changelog-${version}-setup.exe`
@@ -216,7 +229,9 @@ export function portableUpdateScript(
   archivePath: string,
   temporaryDirectory: string,
   processId = process.pid,
+  expectedVersion?: string,
 ): string {
+  if (expectedVersion !== undefined) compareVersions(expectedVersion, expectedVersion);
   const transaction = randomUUID();
   const stage = join(root, `.copilot-update-${transaction}.stage`);
   const backup = join(root, `.copilot-update-${transaction}.backup`);
@@ -263,6 +278,8 @@ try {
     Move-Item -LiteralPath (Join-Path $stage $entry) -Destination (Join-Path $target $entry)
     $installed.Add($entry)
   }
+  ${expectedVersion === undefined ? "" : `$installedVersion = (Get-Content -LiteralPath (Join-Path $target 'app\\node_modules\\copilot-changelog-cli\\package.json') -Raw | ConvertFrom-Json).version
+  if ($installedVersion -ne ${quote(expectedVersion)}) { throw "Installed version $installedVersion does not match expected ${expectedVersion}." }`}
   $committed = $true
   Set-Content -LiteralPath $log -Value 'Update completed successfully.'
 } catch {
@@ -378,8 +395,45 @@ for entry in $entries; do
   mv -- "$stage/$entry" "$target/$entry"
   installed="$entry $installed"
 done
+${expectedVersion === undefined ? "" : `phase='verifying installed version'
+installed_version=$("$target/runtime/node" -p 'require(process.argv[1]).version' "$target/app/node_modules/copilot-changelog-cli/package.json")
+if [ "$installed_version" != ${quote(expectedVersion)} ]; then
+  printf 'Installed version %s does not match expected %s.\\n' "$installed_version" ${quote(expectedVersion)} >&2
+  exit 1
+fi`}
 committed=1
 `;
+}
+
+/** The installer exit code alone is insufficient: verify the version at the installation being updated. */
+export function windowsInstallerUpdateScript(
+  root: string, assetPath: string, temporaryDirectory: string, version: string, processId = process.pid,
+): string {
+  compareVersions(version, version);
+  const quote = (value: string) => `'${value.replaceAll("'", "''")}'`;
+  const logPath = win32.join(root, ".copilot-changelog-update.log");
+  const manifestPath = win32.join(root, "app", "node_modules", packageName, "package.json");
+  return [
+    "$ErrorActionPreference = 'Stop'",
+    "$exitCode = 0",
+    "try {",
+    `  Wait-Process -Id ${processId} -ErrorAction SilentlyContinue`,
+    "  Start-Sleep -Seconds 2",
+    `  Set-Content -LiteralPath ${quote(logPath)} -Encoding UTF8 -Value 'Installing version ${version}...'`,
+    `  $arguments = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS', ${quote(`/DIR="${root}"`)})`,
+    `  $process = Start-Process -FilePath ${quote(assetPath)} -ArgumentList $arguments -Wait -PassThru`,
+    '  if ($process.ExitCode -ne 0) { throw "Installer exited with code $($process.ExitCode)." }',
+    `  $installedVersion = (Get-Content -LiteralPath ${quote(manifestPath)} -Raw | ConvertFrom-Json).version`,
+    `  if ($installedVersion -ne ${quote(version)}) { throw "Installer finished, but this installation reports $installedVersion instead of ${version}." }`,
+    `  Set-Content -LiteralPath ${quote(logPath)} -Encoding UTF8 -Value 'Update completed successfully. Verified installed version: ${version}.'`,
+    "} catch {",
+    "  $exitCode = 1",
+    `  Set-Content -LiteralPath ${quote(logPath)} -Encoding UTF8 -Value ('Update failed: ' + $_.Exception.Message)`,
+    "} finally {",
+    `  Remove-Item -LiteralPath ${quote(temporaryDirectory)} -Recurse -Force -ErrorAction SilentlyContinue`,
+    "}",
+    "exit $exitCode",
+  ].join("\r\n");
 }
 
 async function launchUpdateHelper(command: string, args: string[]): Promise<void> {
@@ -398,10 +452,11 @@ async function launchPortableUpdate(
   root: string,
   archivePath: string,
   temporaryDirectory: string,
+  version: string,
 ): Promise<void> {
   const windows = environment.platform === "win32";
   const scriptPath = join(temporaryDirectory, windows ? "apply-update.ps1" : "apply-update.sh");
-  await writeFile(scriptPath, portableUpdateScript(environment, root, archivePath, temporaryDirectory));
+  await writeFile(scriptPath, portableUpdateScript(environment, root, archivePath, temporaryDirectory, process.pid, version));
   if (!windows) await chmod(scriptPath, 0o700);
   await launchUpdateHelper(windows ? "powershell.exe" : "sh",
     windows ? ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath] : [scriptPath]);
@@ -432,24 +487,12 @@ async function installUpdate(
   if (installation === "windows-installer") {
     const scriptPath = join(temporaryDirectory, "install-update.ps1");
     const logPath = join(root ?? dirname(assetPath), ".copilot-changelog-update.log");
-    const script = [
-      "$ErrorActionPreference = 'Stop'",
-      `Wait-Process -Id ${process.pid} -ErrorAction SilentlyContinue`,
-      "Start-Sleep -Seconds 2",
-      `try {`,
-      `  $process = Start-Process -FilePath '${assetPath.replaceAll("'", "''")}' -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CLOSEAPPLICATIONS' -Wait -PassThru`,
-      `  if ($process.ExitCode -ne 0) { throw "Installer exited with code $($process.ExitCode)." }`,
-      `  Set-Content -LiteralPath '${logPath.replaceAll("'", "''")}' -Value 'Update completed successfully.'`,
-      `} catch {`,
-      `  Set-Content -LiteralPath '${logPath.replaceAll("'", "''")}' -Value ('Update failed: ' + $_.Exception.Message)`,
-      `} finally {`,
-      `  Remove-Item -LiteralPath '${temporaryDirectory.replaceAll("'", "''")}' -Recurse -Force -ErrorAction SilentlyContinue`,
-      `  Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue`,
-      `}`,
-    ].join("\r\n");
+    if (!root) throw new Error("Windows installation root could not be detected.");
+    const script = windowsInstallerUpdateScript(root, assetPath, temporaryDirectory, version);
     await writeFile(scriptPath, script);
-    await launchUpdateHelper("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath]);
-    return `Update ${version} will be installed after this process exits.`;
+    await scheduleUpdate(logPath, version, () =>
+      launchUpdateHelper("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath]));
+    return `Update ${version} will be installed after this process exits.\nTarget: ${root}\nResult log: ${logPath}\nRun copilot-changelog update --status afterward to confirm the outcome.`;
   }
   if (installation === "linux-package") {
     run("sudo", ["dpkg", "-i", assetPath]);
@@ -460,8 +503,50 @@ async function installUpdate(
     return `Updated to ${version}.`;
   }
   if (!root) throw new Error("Portable installation root could not be detected.");
-  await launchPortableUpdate(environment, root, assetPath, temporaryDirectory);
-  return `Update ${version} will be applied after this process exits.`;
+  const logPath = join(root, ".copilot-changelog-update.log");
+  await scheduleUpdate(logPath, version, () => launchPortableUpdate(environment, root, assetPath, temporaryDirectory, version));
+  return `Update ${version} will be applied after this process exits.\nTarget: ${root}\nResult log: ${logPath}\nRun copilot-changelog update --status afterward to confirm the outcome.`;
+}
+
+async function scheduleUpdate(logPath: string, version: string, launch: () => Promise<void>): Promise<void> {
+  await writeFile(logPath, `Update ${version} scheduled; waiting for process ${process.pid} to exit.\n`, "utf8");
+  try { await launch(); }
+  catch (error) {
+    try {
+      await writeFile(logPath, `Update failed to start: ${error instanceof Error ? error.message : String(error)}\n`, "utf8");
+    } catch (logError) {
+      throw new AggregateError([error, logError],
+        `${String(error)}\nRecording the update failure also failed: ${String(logError)}`, { cause: error });
+    }
+    throw error;
+  }
+}
+
+async function updateStatus(currentVersion: string, environment: UpdateEnvironment): Promise<string> {
+  const installation = detectInstallation(environment);
+  const lines = [
+    `CLI version: ${currentVersion}`,
+    `CLI entrypoint: ${environment.cliPath ?? "(not supplied)"}`,
+    `Node runtime: ${environment.execPath}`,
+    `Installation: ${installation.type}${installation.root ? ` (${installation.root})` : ""}`,
+  ];
+  if (installation.root) {
+    const platformPath = environment.platform === "win32" ? win32 : posix;
+    const logPath = platformPath.join(installation.root, ".copilot-changelog-update.log");
+    lines.push(`Update result log: ${logPath}`);
+    try {
+      const message = (await readFile(logPath, "utf8")).replace(/^\uFEFF/, "").trim();
+      lines.push(`Last recorded updater result:\n${message || "(empty log)"}`);
+    } catch (error) {
+      if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error;
+      lines.push("No update helper result has been recorded for this installation.");
+    }
+  } else {
+    lines.push(installation.type === "source"
+      ? "This is a source checkout. Updating an installed copy does not change this checkout or its declared package version."
+      : "npm installation: use the package manager's installation output to diagnose updates.");
+  }
+  return lines.join("\n");
 }
 
 export async function updateCli(currentVersion: string, options: UpdateOptions = {}): Promise<string> {
@@ -475,21 +560,35 @@ export async function updateCli(currentVersion: string, options: UpdateOptions =
     platform: process.platform,
     arch: process.arch,
     execPath: process.execPath,
+    cliPath: fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./cli.ts" : "./cli.js", import.meta.url)),
   };
+  if (options.statusOnly) {
+    if (options.checkOnly) throw new Error("--status and --check cannot be used together.");
+    return updateStatus(currentVersion, environment);
+  }
   if (!["x64", "arm64"].includes(environment.arch)) {
     throw new Error(`Self-update is not supported on architecture ${environment.arch}.`);
   }
+  const installation = detectInstallation(environment);
+  if (installation.type === "source" && !options.checkOnly) {
+    throw new Error(`This command is running from a source checkout: ${environment.cliPath}. Update the checkout and rebuild it with npm run build, or run the installed copilot-changelog command. An npm-global update cannot change this source copy.`);
+  }
+  const managedCommand = installation.type === "scoop" ? "scoop update copilot-changelog"
+    : installation.type === "homebrew" ? "brew update && brew upgrade copilot-changelog" : undefined;
+  if (managedCommand && !options.checkOnly) {
+    return `This installation is managed by ${installation.type}. Run: ${managedCommand}\nPackage-manager files were not modified.`;
+  }
 
+  options.onProgress?.(`Checking the latest stable GitHub release for CLI ${currentVersion} (${installation.type}).`);
   const release = await fetchRelease(fetchImpl, timeoutMs);
   const latestVersion = release.tag_name.replace(/^v/, "");
   if (compareVersions(latestVersion, currentVersion) <= 0) {
     return `Already up to date (${currentVersion}).`;
   }
   if (options.checkOnly) {
-    return `Update available: ${currentVersion} -> ${latestVersion}\n${release.html_url}`;
+    return `Update available: ${currentVersion} -> ${latestVersion}\n${release.html_url}${managedCommand ? `\nUpdate through your package manager: ${managedCommand}` : ""}`;
   }
 
-  const installation = detectInstallation(environment);
   const assetName = selectAssetName(latestVersion, installation.type, environment.platform, environment.arch);
   if (!assetName) {
     return installUpdate(installation.type, environment, undefined, undefined, latestVersion, "");
@@ -499,15 +598,22 @@ export async function updateCli(currentVersion: string, options: UpdateOptions =
   const checksumAsset = release.assets.find((candidate) => candidate.name === "SHA256SUMS");
   if (!asset) throw new Error(`Release ${release.tag_name} does not contain ${assetName}.`);
   if (!checksumAsset) throw new Error(`Release ${release.tag_name} does not contain SHA256SUMS.`);
+  options.onProgress?.(`Downloading ${assetName} and verifying SHA256SUMS. This can take several minutes.`);
 
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "copilot-changelog-update-"));
   try {
     const assetPath = join(temporaryDirectory, asset.name);
     const checksumPath = join(temporaryDirectory, checksumAsset.name);
-    const [content] = await Promise.all([
+    const downloads = await Promise.allSettled([
       download(fetchImpl, asset, assetPath, downloadTimeoutMs),
       download(fetchImpl, checksumAsset, checksumPath, downloadTimeoutMs),
     ]);
+    const failures = downloads.filter((result) => result.status === "rejected").map((result) => result.reason);
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1) throw new AggregateError(failures, failures.map(String).join("\n"));
+    const binary = downloads[0];
+    if (binary.status !== "fulfilled") throw new Error("Update download did not complete.");
+    const content = binary.value;
     const expected = checksumForAsset(await readFile(checksumPath, "utf8"), asset.name);
     const actual = createHash("sha256").update(content).digest("hex");
     if (actual !== expected) throw new Error(`Checksum verification failed for ${asset.name}.`);

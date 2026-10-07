@@ -3,11 +3,11 @@ import {
   defaultFrom, parseExecutionControls, parseSpeakerNotesLanguages, rangeFromOptions,
 } from "./run-options.js";
 
-const controls = { resume: false, restart: false, requestTimeout: "180", concurrency: "1" };
+const controls = { resume: false, restart: false, requestTimeout: "180", concurrency: "3" };
 
 test("converts numeric controls without changing CLI defaults", () => {
   expect(parseExecutionControls(controls)).toEqual({
-    requestTimeoutMs: 180_000, concurrency: 1, limit: undefined,
+    requestTimeoutMs: 180_000, concurrency: 3, limit: undefined,
   });
   expect(parseExecutionControls({ ...controls, requestTimeout: "2147483", concurrency: "8", limit: "10" }))
     .toEqual({ requestTimeoutMs: 2_147_483_000, concurrency: 8, limit: 10 });

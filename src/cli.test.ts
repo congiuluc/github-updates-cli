@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import JSZip from "jszip";
 import { afterEach, expect, test } from "vitest";
@@ -122,6 +123,13 @@ test("writes a partial AI deck, preserves accepted slides, and adds a rejected s
   expect(state.completed.map((post: { title: string }) => post.title)).toEqual(["Second article"]);
   expect(firstRun.stderr).toContain("1 slide was omitted");
   expect(firstRun.stderr).toContain("AI credits: 1.5 (reported)");
+  const firstSummary = firstRun.stderr.slice(firstRun.stderr.lastIndexOf("Needs attention:"));
+  expect(firstSummary).toContain("1 pending or omitted");
+  expect(firstSummary).toContain(`Open deck: ${pathToFileURL(join(outputDirectory, `${stem}.pptx`)).href}`);
+  expect(firstSummary).toContain("re-run the same command with --resume");
+  expect(firstSummary).not.toContain("AI credits:");
+  expect(firstRun.stdout).not.toContain("\x1b");
+  expect(firstRun.stderr).not.toContain("\x1b");
   expect(state.usage).toMatchObject({ requests: 6, creditReports: 6, totalNanoAiu: 1_500_000_000 });
   const countSlides = (zip: JSZip) => Object.keys(zip.files).filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name)).length;
   expect(countSlides(await JSZip.loadAsync(await readFile(join(outputDirectory, `${stem}.pptx`))))).toBe(4);
@@ -134,6 +142,10 @@ test("writes a partial AI deck, preserves accepted slides, and adds a rejected s
   expect(resumedRun.stderr).toContain("Enriching 1/2 articles.");
   expect(resumedRun.stderr).toContain("AI credits: 1.75 (reported). Includes previous attempts");
   expect(resumedRun.stderr).toContain("This execution: AI credits: 0.25 (reported)");
+  const finalSummary = resumedRun.stderr.slice(resumedRun.stderr.lastIndexOf("Complete:"));
+  expect(finalSummary).toContain("Complete: 2 articles in the generated deck");
+  expect(finalSummary).toContain("Open deck:");
+  expect(finalSummary).not.toContain("Reminder:");
   expect(countSlides(await JSZip.loadAsync(await readFile(join(outputDirectory, `${stem}.pptx`))))).toBe(6);
   const website = await readFile(join(outputDirectory, `${stem}.html`), "utf8");
   expect(website).toContain("First article");
@@ -283,9 +295,66 @@ test.each([false, true])("uses compact concurrent progress in TTY unless verbose
     expect(stderr).toContain("2/2 (100%)");
     expect(stderr).not.toContain("Starting 1/2");
     expect(stderr).not.toContain("Completed 1/2");
+    expect(stderr).toMatch(/[\u2588\u2592#]/);
+    expect(stderr).toMatch(/\d{2}:\d{2}/);
   }
   expect(stderr).toContain("AI credits: 0.5 (reported)");
+  const completion = stderr.slice(stderr.lastIndexOf("Complete:"));
+  expect(completion).toContain("Open deck:");
+  expect(completion).not.toContain("\x1b[J");
 }, 35_000);
+
+test.each([false, true])("TTY output provides colored status and a clickable deck unless NO_COLOR=%s", async (noColor) => {
+  outputDirectory = await mkdtemp(join(tmpdir(), "copilot-cli-links-"));
+  const output = join(outputDirectory, "deck #1 100% multilingual");
+  const ttyImport = `data:text/javascript,${encodeURIComponent(`
+    delete process.env.NO_COLOR;
+    delete process.env.CI;
+    process.env.TERM = "xterm-256color";
+    process.env.TERM_PROGRAM = "vscode";
+    if (${noColor}) process.env.NO_COLOR = "";
+    Object.defineProperties(process.stderr, {
+      isTTY: { value: true }, columns: { value: 120 }, rows: { value: 24 },
+    });
+  `)}`;
+  const { stdout, stderr } = await execFileAsync(process.execPath, [
+    "--import", "tsx", "--import", ttyImport, resolve("src/cli.ts"),
+    "--from", "2026-08-01", "--to", "2026-08-31", "--feed", resolve("test/fixtures/feed.xml"),
+    "--no-ai", "--output", output,
+  ], { cwd: resolve("."), env: cliEnvironment, timeout: 60_000 });
+  const deck = join(output, "copilot-changelog-2026-08-01-to-2026-08-31.pptx");
+  const uri = pathToFileURL(deck).href;
+  expect(stdout).toContain(`Presentation: ${deck}`);
+  expect(stdout).not.toContain("\x1b");
+  expect(stderr).toContain(uri);
+  expect(stderr).toContain("Complete: 1 article");
+  if (noColor) {
+    expect(stderr).not.toMatch(/\x1b\[[0-9;]*m/);
+    expect(stderr).not.toContain("\x1b]8");
+  } else {
+    expect(stderr).toContain(`\x1b]8;;${uri}\x1b\\${deck}\x1b]8;;\x1b\\`);
+    expect(stderr).toContain("\x1b[32mComplete:");
+    expect(stderr).toContain("\x1b[36m");
+  }
+}, 65_000);
+
+test.each([
+  ["--concurrency", "0", "\x1b[31mError: Invalid --concurrency"],
+  ["--unknown-option", "", "\x1b[31merror: unknown option"],
+])("TTY failure for %s is red and never advertises an ungenerated deck", async (flag, value, expected) => {
+  const ttyImport = `data:text/javascript,${encodeURIComponent(`
+    delete process.env.NO_COLOR;
+    process.env.TERM = "xterm-256color";
+    Object.defineProperty(process.stderr, "isTTY", { value: true });
+  `)}`;
+  const execution = execFileAsync(process.execPath, [
+    "--import", "tsx", "--import", ttyImport, resolve("src/cli.ts"), flag, ...(value ? [value] : []),
+  ], { cwd: resolve("."), env: cliEnvironment, timeout: 20_000 });
+  await expect(execution).rejects.toMatchObject({
+    code: 1, stderr: expect.stringContaining(expected),
+  });
+  await expect(execution).rejects.toMatchObject({ stderr: expect.not.stringContaining("Open deck:") });
+}, 25_000);
 
 test.each(["resume", "restart"] as const)("handles legacy credit history on --%s", async (action) => {
   outputDirectory = await mkdtemp(join(tmpdir(), "copilot-changelog-legacy-usage-"));
@@ -308,7 +377,7 @@ test.each(["resume", "restart"] as const)("handles legacy credit history on --%s
     : "AI credits: 0.25 (reported)");
 }, 35_000);
 
-test.each([["--help"], ["-h"], ["--version"], ["-V"], ["version"], ["update", "--help"], ["update", "-h"]])(
+test.each([["--help"], ["-h"], ["--version"], ["-V"], ["version"], ["update", "--help"], ["update", "-h"], ["unlock", "--help"]])(
   "handles %j without loading generation dependencies",
   async (...args) => {
     const loader = `data:text/javascript,${encodeURIComponent(`
@@ -330,11 +399,38 @@ test.each([["--help"], ["-h"], ["--version"], ["-V"], ["version"], ["update", "-
     ], { cwd: resolve("."), env: cliEnvironment, timeout: 20_000 });
     expect(stdout).toContain(args.includes("--help") || args.includes("-h") ? "Usage:" : version);
     if (args.length === 1 && args[0] === "--help") {
-      expect(stdout).toMatch(/--concurrency <count>\s+articles enriched in parallel \(1-8\)\s+\(default: "1"\)/);
+      expect(stdout).toMatch(/--concurrency <count>\s+articles enriched in parallel \(1-8\)\s+\(default: "3"\)/);
     }
   },
   25_000,
 );
+
+test("update --status reports the actual entrypoint without performing a release lookup", async () => {
+  const { stdout, stderr } = await execFileAsync(process.execPath, [
+    "--import", "tsx", resolve("src/cli.ts"), "update", "--status",
+  ], { cwd: resolve("."), env: cliEnvironment, timeout: 20_000 });
+  expect(stdout).toContain(`CLI version: ${version}`);
+  expect(stdout).toContain(resolve("src/cli.ts"));
+  expect(stdout).toContain("Installation: source");
+  expect(stdout).toContain("does not change this checkout");
+  expect(stderr).not.toContain("Checking the latest");
+}, 25_000);
+
+test("unlock removes a stale run lock without changing its checkpoint", async () => {
+  const { hostname } = await import("node:os");
+  outputDirectory = await mkdtemp(join(tmpdir(), "copilot-cli-unlock-"));
+  const lock = join(outputDirectory, "briefing.lock");
+  const checkpoint = join(outputDirectory, "checkpoint.json");
+  await writeFile(lock, JSON.stringify({ pid: 2147483647, hostname: hostname(), token: "test-owner" }));
+  await writeFile(checkpoint, "saved checkpoint");
+  const { stdout } = await execFileAsync(process.execPath, [
+    "--import", "tsx", resolve("src/cli.ts"), "unlock", lock,
+  ], { cwd: resolve("."), env: cliEnvironment, timeout: 20_000 });
+  expect(stdout).toContain("Removed stale run lock");
+  expect(stdout).toContain("--resume");
+  expect(await readFile(checkpoint, "utf8")).toBe("saved checkpoint");
+  await expect(access(lock)).rejects.toThrow();
+}, 25_000);
 
 test("short options preserve source selection, language settings, outputs and validation", async () => {
   outputDirectory = await mkdtemp(join(tmpdir(), "copilot-changelog-short-options-"));
@@ -470,7 +566,7 @@ test(
     );
     expect(trace).toContain('"event":"run_started"');
     expect(trace).toContain('"requestTimeoutMs":180000');
-    expect(trace).toContain('"concurrency":"1"');
+    expect(trace).toContain('"concurrency":"3"');
     expect(trace).toContain('"event":"run_completed"');
     await expect(
       access(join(outputDirectory, "copilot-changelog-2026-08-01-to-2026-08-31.html")),

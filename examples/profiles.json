@@ -5,7 +5,7 @@
     "model": "auto",
     "slidesLanguage": "en",
     "speakerNotesLanguages": "en",
-    "concurrency": 1,
+    "concurrency": 3,
     "requestTimeout": 180,
     "maxCredits": "5",
     "cache": true,

@@ -211,3 +211,16 @@ jobs:
             args+=(--prerelease)
           fi
           gh release create "$RELEASE_TAG" ./* --repo "$GITHUB_REPOSITORY" "${args[@]}"
+
+  distribute:
+    # A direct call also works when GITHUB_TOKEN created the release without triggering new events.
+    needs: [verify-version, publish]
+    if: needs.verify-version.outputs.tag != '' && !contains(needs.verify-version.outputs.version, '-')
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/distribute.yml
+    with:
+      tag: ${{ needs.verify-version.outputs.tag }}
+      source-commit: ${{ needs.verify-version.outputs.commit }}
+    secrets: inherit

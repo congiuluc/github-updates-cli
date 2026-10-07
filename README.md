@@ -32,7 +32,7 @@
 | --- | --- | --- |
 | Collect the Copilot changelog, optional RSS/Atom feeds and AI & ML articles; preview and filter before spending. | Get audience-aware slides, source quotations, editable JSON, and locale-selected presenter notes. | Reuse accepted content, cap credits, and resume or schedule incremental briefings. |
 
-Copilot receives validation errors to correct rejected content instead of mechanically trimming facts. If final review fails, the CLI warns, skips that article, and continues. Transient retries receive the latest error, original task and outstanding validation problems; timeouts are not retried on a potentially busy session.
+Copilot's first prompt includes only the selected section and the validator's exact word/character limits, plus a final compliance checklist. Retries remain a safety net, not a guarantee: rejected content receives error feedback rather than mechanical trimming. If final review fails, the CLI warns, skips the article and continues. Timeouts are not retried on a potentially busy session.
 
 ## Get started
 
@@ -71,7 +71,7 @@ Examples use long options for clarity; **case-sensitive short aliases** remain a
 
 Languages accept canonical BCP 47 locale tags, such as `de`, `pt-BR`, `zh-Hant` and `ar`, not a fixed language list. AI also localizes slide headings and introductory notes; translation quality depends on the model. When resuming, keep the original locale, model and source options. `--no-ai` does not translate source text and uses English template fallbacks where built-in translations are unavailable.
 
-Interactive terminals show an in-place progress bar and a status row per concurrent worker (`--concurrency 1` through `8`). Source preparation updates in place too. Redirected output, `TERM=dumb`, and `--verbose` keep plain scrolling logs; warnings and errors remain visible.
+AI enrichment defaults to **3 concurrent workers**; use `--concurrency 1` for sequential processing (allowed range: 1-8). Interactive terminals show a **WinGet-style block bar**, percentage, article counter, elapsed time and worker rows. Cyan means information, green success, yellow warnings/retries and red failures. `NO_COLOR` disables colors; redirected output and `TERM=dumb` stay plain. `--verbose` keeps scrolling logs and raw JSON traces. The final summary offers an **Open deck** link and a `--resume` reminder for pending articles.
 
 AI runs report cumulative credits across resume. `--max-credits` stops new requests at a soft limit; active calls may overshoot. Missing billing data pauses budgeted runs rather than assuming calls are free. Budget pauses retain the checkpoint and exit with code 2. Accepted content is cached by source and generation settings; `--no-cache` disables reuse and `--restart` requests new content.
 
@@ -89,7 +89,7 @@ Start with the [sample profiles](examples/profiles.json). Profiles, preview, bud
 
 Files are written to `output/`: a `.pptx` deck, a `.trace.jsonl` log, and optional `.html` digest. **Review trace logs before sharing:** they contain prompts and generated text.
 
-Use `copilot-changelog --version` for the installed version, `copilot-changelog update --check` to check releases without installing, and `copilot-changelog update` to install an update. Release tags supply the version stamped into packaged manifests and lockfiles; existing tags can be rebuilt through the Release workflow's `tag` input.
+Use `copilot-changelog update --check` to check releases and `copilot-changelog update --status` to identify the exact installed copy and its last update result. Deferred installer/portable updates verify the installed version; source checkouts and Scoop/Homebrew-managed files are not overwritten. `copilot-changelog unlock "<reported-lock-path>"` safely removes a stale local run lock without deleting its checkpoint. Stable releases prepare [opt-in WinGet, npm, Scoop and Homebrew distribution](https://congiuluc.github.io/github-updates-cli/#distribution).
 
 ## Explore the documentation
 

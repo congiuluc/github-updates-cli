@@ -168,6 +168,8 @@ test("profiles, explicit overrides and dry-run select Atom articles without AI o
   const result = await run(f.log, [...dates, "-g", config, "-p", "team", "-i", "database", "-M", "-d"], "forbid");
   const preview = JSON.parse(result.stdout);
   expect(preview.selected).toBe(1);
+  expect(result.stderr).not.toContain("Open deck:");
+  expect(result.stderr).not.toContain("Complete:");
   expect(preview.entries).toContainEqual(expect.objectContaining({ title: "Database release", status: "selected" }));
   expect(preview.entries).toContainEqual(expect.objectContaining({ title: "Retired database release", status: "exclude-filter" }));
   await expect(access(f.output)).rejects.toThrow();
@@ -197,7 +199,9 @@ test("accepted content is reusable across dates and formats without new AI credi
 test("review-only exports editable content, and offline import preserves edits without AI", async () => {
   const f = await fixture();
   const review = join(f.output, `${stem}.review.json`);
-  await run(f.log, [...dates, "-F", f.feed, "-o", f.output, "-Q", "-n", "en,it"]);
+  const draftRun = await run(f.log, [...dates, "-F", f.feed, "-o", f.output, "-Q", "-n", "en,it"]);
+  expect(draftRun.stderr).toContain("Open editable content:");
+  expect(draftRun.stderr).not.toContain("Open deck:");
   await expect(access(join(f.output, `${stem}.pptx`))).rejects.toThrow();
   const document = await json(review);
   document.articles[0].summary = "Developers can organize related agent sessions and inspect proposed changes before accepting them.";
@@ -212,9 +216,9 @@ test("review-only exports editable content, and offline import preserves edits w
 
 test("credit limits pause and checkpoint the run, including cumulative cost after resume", async () => {
   const f = await fixture(2);
-  const args = [...dates, "-F", f.feed, "-o", f.output, "-e", join(f.root, "content.json")];
+  const args = [...dates, "-F", f.feed, "-o", f.output, "--concurrency", "1", "-e", join(f.root, "content.json")];
   await expect(run(f.log, [...args, "-b", "0.25"])).rejects.toMatchObject({
-    code: 2, stderr: expect.stringContaining("AI credit limit reached"),
+    code: 2, stderr: expect.stringMatching(/AI credit limit reached[\s\S]*Needs attention:[\s\S]*Open deck:[\s\S]*--resume[\s\S]*unchanged exhausted budget/),
   });
   const checkpoint = join(f.output, `.${stem}.checkpoint.json`);
   expect((await json(checkpoint)).completed).toHaveLength(1);
@@ -229,7 +233,7 @@ test("credit limits pause and checkpoint the run, including cumulative cost afte
 
 test("missing billing data pauses further budgeted calls without discarding accepted content", async () => {
   const f = await fixture(2);
-  await expect(run(f.log, [...dates, "-F", f.feed, "-o", f.output, "-b", "1"], "missing"))
+  await expect(run(f.log, [...dates, "-F", f.feed, "-o", f.output, "--concurrency", "1", "-b", "1"], "missing"))
     .rejects.toMatchObject({ code: 2, stderr: expect.stringContaining("credit usage is incomplete") });
   expect(await calls(f.log)).toHaveLength(1);
   expect((await json(join(f.output, `.${stem}.checkpoint.json`))).completed).toHaveLength(1);

@@ -6,6 +6,8 @@ import { loadProfile } from "./profiles.js";
 import { audiences } from "./generation.js";
 import { defaultFrom, type CliOptions } from "./run-options.js";
 import { updateCli } from "./updater.js";
+import { consoleColorsEnabled, formatConsoleMessage, writeConsoleMessage } from "./console-output.js";
+import { DEFAULT_ENRICHMENT_CONCURRENCY } from "./types.js";
 
 const today = new Date().toISOString().slice(0, 10);
 const packageMetadata = JSON.parse(
@@ -14,23 +16,24 @@ const packageMetadata = JSON.parse(
 
 async function showStartupStatus(): Promise<void> {
   if (process.stderr.isTTY) {
-    const useColor = !("NO_COLOR" in process.env) && process.env.TERM !== "dumb";
+    const useColor = consoleColorsEnabled(process.stderr);
     process.stderr.write(
       `${renderStartupBanner(packageMetadata.version, useColor, process.stderr.columns)}\n`,
     );
   } else {
     process.stderr.write(`Copilot Changelog CLI v${packageMetadata.version}\n`);
   }
-  if (process.env.COPILOT_CHANGELOG_SKIP_UPDATE_CHECK === "1" || process.argv[2] === "update") return;
+  if (process.env.COPILOT_CHANGELOG_SKIP_UPDATE_CHECK === "1" || ["update", "unlock"].includes(process.argv[2])) return;
   try {
     const status = await updateCli(packageMetadata.version, {
       checkOnly: true,
       requestTimeoutMs: 3_000,
     });
-    process.stderr.write(`Update status: ${status}\n`);
+    writeConsoleMessage(`Update status: ${status}\n`);
   } catch (error) {
-    process.stderr.write(
+    writeConsoleMessage(
       `Update status unavailable: ${error instanceof Error ? error.message : String(error)}\n`,
+      "warning",
     );
   }
 }
@@ -57,7 +60,7 @@ const program = new Command()
   .option("-R, --resume", "resume a previous unfinished run without prompting")
   .option("-S, --restart", "discard a previous unfinished run without prompting")
   .option("-v, --verbose", "stream execution trace events to stderr (includes AI prompts and responses)")
-  .option("-c, --concurrency <count>", "articles enriched in parallel (1-8)", "1")
+  .option("-c, --concurrency <count>", "articles enriched in parallel (1-8)", String(DEFAULT_ENRICHMENT_CONCURRENCY))
   .option("-T, --request-timeout <seconds>", "maximum wait per Copilot response or initialization operation; timeouts are not retried automatically", "180")
   .option("-A, --no-ai", "skip Copilot SDK enrichment (intended for testing)")
   .option("-U, --ai", "enable AI enrichment, overriding a profile", true)
@@ -85,6 +88,9 @@ const program = new Command()
   .option("-N, --regenerate-language <language...>", "regenerate only an existing speaker-note language for selected URLs", [])
   .option("-M, --no-include-ai-ml", "disable the optional blog source, overriding a profile")
   .option("-W, --no-website", "disable HTML output, overriding a profile")
+  .configureOutput({
+    outputError: (message, write) => write(formatConsoleMessage(message, "error", process.stderr)),
+  })
   .showHelpAfterError()
   .exitOverride();
 
@@ -99,8 +105,20 @@ program
   .command("update")
   .description("Update the CLI to the latest GitHub release")
   .option("-k, --check", "check for an update without installing it")
-  .action(async (options: { check?: boolean }) => {
-    process.stdout.write(`${await updateCli(packageMetadata.version, { checkOnly: options.check })}\n`);
+  .option("-L, --status", "show this installation's paths and last recorded update result without networking")
+  .action(async (options: { check?: boolean; status?: boolean }) => {
+    writeConsoleMessage(`${await updateCli(packageMetadata.version, {
+      checkOnly: options.check, statusOnly: options.status,
+      onProgress: (message) => { writeConsoleMessage(`${message}\n`); },
+    })}\n`, "info", process.stdout);
+  });
+
+program
+  .command("unlock <path>")
+  .description("Remove one stale local run lock without deleting its checkpoint; active or unknown owners are refused")
+  .action(async (path: string) => {
+    const { removeStaleRunLock } = await import("./run-lock.js");
+    writeConsoleMessage(`${await removeStaleRunLock(path)}\n`, "success", process.stdout);
   });
 
 program.action(async (options: CliOptions, command: Command) => {
@@ -118,6 +136,6 @@ showStartupStatus().then(() => program.parseAsync()).catch((error: unknown) => {
     process.exitCode = error.exitCode;
     return;
   }
-  process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
+  writeConsoleMessage(`Error: ${error instanceof Error ? error.message : String(error)}\n`, "error");
   process.exitCode = 1;
 });

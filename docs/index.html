@@ -71,6 +71,7 @@
           <a href="#automation">Incremental scheduling</a>
           <a href="#packaging">Packaging</a>
           <a href="#release">CI &amp; releases</a>
+          <a href="#distribution">Package registries</a>
           <a href="#github-pages">Publish GitHub Pages</a>
           <a href="#security">Security &amp; signing</a>
         </nav>
@@ -141,7 +142,7 @@ npm install --global .</code></pre></div>
         <p><code>--no-ai</code> is a deterministic test mode, not a translation engine. It retains source text and uses built-in English/Italian template text or a warned English fallback for other locales. The optional website retains its English interface while marking article content with its selected locale and text direction.</p>
         <h3>Try a smaller selection</h3>
         <div class="code-block"><div class="code-heading"><span>Five newest matching entries</span></div><pre><code>copilot-changelog --from 2026-08-01 --to 2026-08-31 --limit 5 --output output-demo</code></pre></div>
-        <p>Generation commands print the installed version and perform a short release check. Interactive terminals show a Copilot-themed banner; <code>NO_COLOR</code> disables color. Redirected output stays script-friendly, with progress on stderr and generated file paths on stdout.</p>
+        <p>Generation commands print the installed version and perform a short release check. Interactive terminals use cyan for information, green for success, yellow for warnings/retries, red for failures and dim text for trace paths. Messages retain their descriptive text, so color is never the only signal. <code>NO_COLOR</code> disables colors; redirected output and <code>TERM=dumb</code> stay plain. Progress and the final human-readable summary go to stderr; generated file-path records remain on stdout.</p>
         <p>The startup release check has a three-second deadline, including the response body. A failed check does not prevent generation.</p>
       </section>
 
@@ -173,7 +174,7 @@ copilot-changelog --rss https://example.com/news.xml --rss team-news.xml --inclu
         <p><code>-p, --profile</code> loads a named profile from <code>.copilot-changelog.json</code> in the current directory. Use <code>-g, --config</code> for another file. No configuration file is loaded implicitly when neither option is supplied.</p>
         <div class="code-block"><div class="code-heading"><span>Example .copilot-changelog.json</span></div><pre><code>{
   "version": 1,
-  "defaults": { "model": "auto", "concurrency": 1, "maxCredits": "5" },
+  "defaults": { "model": "auto", "concurrency": 3, "maxCredits": "5" },
   "profiles": {
     "team": { "audience": "developer", "website": true, "rss": ["team-news.xml"] },
     "executive": { "audience": "executive", "evidence": true }
@@ -231,6 +232,8 @@ copilot-changelog --config examples/profiles.json --profile team --no-include-ai
         <p class="eyebrow">Guides / AI quality</p>
         <h2 id="review-title">Review that tells the model what failed</h2>
         <p>The source determines the required section. Copilot receives the article and section-specific instructions, with examples encouraging concrete explanations rather than vague benefit statements.</p>
+        <p>The initial prompt includes only the assigned section's guidance and lists the exact hard word/character limits used by the validator. Its structural template shows a valid bullet count, distinguishes mandatory limits from preferred writing targets, and asks the model to check its JSON, field limits, factual qualifiers and optional evidence/localization before sending the first response. Limits are shared with the validator in code to prevent drift.</p>
+        <p>These instructions reduce avoidable ambiguity without weakening validation or discarding facts to fit. They do not guarantee a valid first answer, and a self-check instruction is not an additional verification call. Retry and final-review limits are unchanged. The trace records validation issues and attempts; use real run results to assess first-attempt acceptance rather than assuming a shorter prompt guarantees fewer calls.</p>
         <ol class="steps">
           <li><strong>Generate and validate.</strong> The initial response is checked for structure, required fields, presentation limits, and requested notes.</li>
           <li><strong>Correct with feedback.</strong> Up to three corrective rewrites receive the exact validation errors. Prompts preserve valid fields, exceptions, eligibility, deadlines, and prerequisites.</li>
@@ -271,6 +274,9 @@ copilot-changelog --import-json reviewed.json --regenerate https://example.com/a
   copilot-changelog-2026-08-01-to-2026-08-31.html  # with --website</code></pre></div>
         <p>Different date ranges have different filenames. Re-running the <em>same</em> range rewrites its deck and requested website; choose another <code>--output</code> directory to preserve an earlier version.</p>
         <p>The optional website embeds article images and provides local search. It is a generated digest, separate from this GitHub Pages documentation site. Slide and note languages are independently selectable; the digest's interface labels remain English.</p>
+        <h3>Open the completed deck</h3>
+        <p>After output writing, state cleanup and AI credit reporting, the final summary includes <strong>Open deck</strong>. Recognized hyperlink-capable terminals, including Windows Terminal and VS Code, receive a clickable terminal hyperlink; use the terminal's click or Ctrl+click gesture. Other terminals, redirected output, CI and <code>NO_COLOR</code> receive a fully encoded <code>file://</code> URL that can be copied or opened by a terminal that detects file links. Paths containing spaces, Unicode, percent signs or <code>#</code> are encoded safely. No file is opened automatically.</p>
+        <p>Partial decks still receive a link, followed by a visible reminder to re-run the same command with <code>--resume</code>. Keep the same dates, sources, model and locales, and remove <code>--restart</code>. A budget pause also reminds you to review its credit/usage warning before retrying. Imported partial JSON points you back to the original source-collection command; importing the same incomplete document cannot restore absent articles. Review-only mode links to the editable JSON instead of claiming a deck was generated; failed or dry-run commands do not show a completion link.</p>
         <h3>Trace logs</h3>
         <p>The JSONL trace is appended on each run with a unique <code>runId</code>. It records source preparation, prompts, raw AI responses, validation, checkpoint activity, skipped articles, and failures. Its path is printed at startup and included in error messages.</p>
         <div class="code-block"><div class="code-heading"><span>Mirror trace events to stderr</span></div><pre><code>copilot-changelog --from 2026-08-01 --to 2026-08-31 --verbose</code></pre></div>
@@ -299,7 +305,12 @@ copilot-changelog --import-json reviewed.json --regenerate https://example.com/a
           <li>Malformed checkpoints are preserved and reported on resume. Restart discards them without parsing.</li>
           <li>A per-deck <code>.lock</code> blocks competing processes for the same output directory and date range. Restart does not override an active lock.</li>
         </ul>
-        <div class="callout warning"><strong>After a forced termination</strong><p>Confirm that no run is still active, remove only the reported stale lock, and resume. Do not delete the checkpoint. Locks are released automatically after normal completion or handled errors.</p></div>
+        <h3>Recover a stale run lock</h3>
+        <div class="code-block"><div class="code-heading"><span>Use the exact lock-file path shown in the error</span></div><pre><code>copilot-changelog unlock "output/.copilot-changelog-2026-08-01-to-2026-08-31.lock"
+copilot-changelog --from 2026-08-01 --to 2026-08-31 --resume</code></pre></div>
+        <p><code>unlock</code> removes only one regular run-lock file whose recorded PID no longer exists on the current host. It supports briefing locks and incremental-state locks. It refuses active or protected processes, another host's locks, malformed ownership data, symbolic/hard links, directories and non-lock paths. There is no force option. Checkpoints and caches are never deleted.</p>
+        <p>A temporary <code>.recovery</code> ownership file coordinates removal with new runs. If recovery itself was interrupted, the CLI reports that exact file; it can also be passed to <code>unlock</code> once its local owner is confirmed dead. Portable-updater lock directories have different recovery requirements and are deliberately excluded.</p>
+        <div class="callout warning"><strong>After a forced termination</strong><p>Use the reported stale lock path and then resume. Do not delete the checkpoint or terminate other processes merely to bypass a lock. Normal completion and handled errors release run locks automatically; unknown ownership requires manual investigation.</p></div>
       </section>
 
       <section id="cli-reference" class="doc-section" aria-labelledby="cli-title">
@@ -322,7 +333,7 @@ copilot-changelog --import-json reviewed.json --regenerate https://example.com/a
             <tr><th scope="row"><code>-w, --website</code></th><td>Also generate the self-contained HTML digest.</td><td>Disabled</td></tr>
             <tr><th scope="row"><code>-R, --resume</code></th><td>Reuse compatible completed content without prompting.</td><td>Disabled</td></tr>
             <tr><th scope="row"><code>-S, --restart</code></th><td>Discard saved progress without prompting.</td><td>Disabled</td></tr>
-            <tr><th scope="row"><code>-c, --concurrency &lt;count&gt;</code></th><td>Simultaneous article workers, from 1 to 8.</td><td><code>1</code></td></tr>
+            <tr><th scope="row"><code>-c, --concurrency &lt;count&gt;</code></th><td>Simultaneous article workers, from 1 to 8.</td><td><code>3</code></td></tr>
             <tr><th scope="row"><code>-T, --request-timeout &lt;seconds&gt;</code></th><td>Separate deadline for each response or initialization operation. Positive whole seconds, up to 2147483.</td><td><code>180</code></td></tr>
             <tr><th scope="row"><code>-A, --no-ai</code></th><td>Use deterministic templates rather than Copilot enrichment.</td><td>AI enabled</td></tr>
             <tr><th scope="row"><code>-v, --verbose</code></th><td>Stream trace events, including prompts and responses, to stderr.</td><td>Disabled</td></tr>
@@ -366,8 +377,10 @@ copilot-changelog --import-json reviewed.json --regenerate https://example.com/a
           <table><caption>Management commands</caption><thead><tr><th scope="col">Command</th><th scope="col">Behavior</th></tr></thead><tbody>
             <tr><th scope="row"><code>copilot-changelog version</code></th><td>Print the installed CLI version.</td></tr>
             <tr><th scope="row"><code>copilot-changelog update --check</code></th><td><code>-k, --check</code>: check GitHub Releases without installing.</td></tr>
+            <tr><th scope="row"><code>copilot-changelog update --status</code></th><td><code>-L, --status</code>: show this copy's version, CLI/runtime paths, installation type and last recorded update result without networking. Cannot be combined with <code>--check</code>.</td></tr>
             <tr><th scope="row"><code>copilot-changelog update</code></th><td>Verify and install the latest compatible release.</td></tr>
             <tr><th scope="row"><code>copilot-changelog update --help</code></th><td>Show update-command help.</td></tr>
+            <tr><th scope="row"><code>copilot-changelog unlock &lt;path&gt;</code></th><td>Remove one verifiably stale local run lock; preserve its checkpoint. Active, unknown and updater-directory locks are refused.</td></tr>
           </tbody></table>
         </div>
       </section>
@@ -375,8 +388,14 @@ copilot-changelog --import-json reviewed.json --regenerate https://example.com/a
       <section id="timeouts" class="doc-section" aria-labelledby="timeouts-title">
         <p class="eyebrow">Reference / Runtime</p>
         <h2 id="timeouts-title">Predictable work, bounded waits</h2>
-        <p>Sequential enrichment is the default: one shared client, one fresh session per article. Use <code>--concurrency 2</code> through <code>8</code> only when your Copilot environment supports the load. Corrective prompts stay associated with their source; results retain changelog order within each section.</p>
-        <p>Interactive terminals show a progress bar and one status row per concurrent worker, updated in place with the article title, attempt, validation, and reviewer status. The bar counts processed articles, including omissions listed separately, and starts from accepted articles on resume. Source preparation also updates in place. Warnings remain visible. Redirected output, <code>TERM=dumb</code>, and <code>--verbose</code> retain plain scrolling logs. Increase terminal height to see every worker when space is limited.</p>
+        <p>Enrichment defaults to three concurrent article workers, using one shared client and one fresh session per article. Use <code>--concurrency 1</code> for sequential processing or select another value from 1 through 8. Explicit CLI or profile settings override the default. The collector still uses five download slots independently. Corrective prompts stay associated with their source; results retain changelog order within each section.</p>
+        <p>Interactive terminals show a WinGet-style block progress bar with percentage, processed/total article count, elapsed time and an animated wait indicator. A row per concurrent worker remains below it with the article title, attempt, validation and reviewer status. The display updates in place without appending a new bar for each refresh.</p>
+        <div class="code-block"><div class="code-heading"><span>Example while waiting for concurrent AI responses</span></div><pre><code>\ Enriching  ████████████▒▒▒▒▒▒▒▒▒▒▒▒  6/12 (50%) 00:42
+Worker 1: attempt 1 - Agent workflow improvements
+Worker 2: validating - Model availability update</code></pre></div>
+        <p>Percentage measures processed articles, including omissions listed separately, and starts from accepted articles on resume. It is not a guessed percentage of a model response: while an AI request is pending, the spinner and elapsed time move but the article count does not. The timer stops on completion, error, budget pause or display cleanup and cannot keep the CLI process alive. Each new phase starts its own elapsed-time counter.</p>
+        <p>Rows retain severity colors and are fitted to terminal width before styling. Narrow terminals shorten the phase label and bar before dropping the elapsed time; counters remain visible where space permits. Unicode blocks use fractional fill; limited terminals (<code>TERM=linux</code> or a <code>C</code>/<code>POSIX</code> locale) fall back to ASCII. Warnings remain visible outside the live display.</p>
+        <p>Redirected output and <code>TERM=dumb</code> use plain scrolling logs; <code>--verbose</code> disables in-place updates but keeps human-message colors in a capable terminal. CI does not schedule animated redraws. Verbose JSON trace lines are never colored or rewritten. <code>NO_COLOR</code> disables colors and styled hyperlinks without disabling the compact progress display. Increase terminal height to see every worker when space is limited.</p>
         <p>The 180-second deadline applies separately to each response, runtime startup, model discovery, and primary or reviewer session creation. Timeouts stop new articles and retries. Active peers may complete and be checkpointed before runtime shutdown.</p>
         <div class="code-block"><div class="code-heading"><span>Resume with less contention</span></div><pre><code>copilot-changelog --from 2026-08-01 --to 2026-08-31 --resume --concurrency 1 --request-timeout 180</code></pre></div>
         <p>Increasing the timeout permits slower responses; it does not speed up inference. Abort/disconnect and shutdown have bounded cleanup waits. Both sessions are cleaned up even if one cleanup fails, and cleanup diagnostics are reported alongside the original error. A forced SDK stop is attempted if graceful shutdown fails.</p>
@@ -388,15 +407,20 @@ copilot-changelog --import-json reviewed.json --regenerate https://example.com/a
         <h2 id="updates-title">Keep the CLI current</h2>
         <div class="code-block"><div class="code-heading"><span>Check, then update</span></div><pre><code>copilot-changelog --version
 copilot-changelog update --check
-copilot-changelog update</code></pre></div>
+copilot-changelog update
+# After the updater finishes:
+copilot-changelog update --status</code></pre></div>
         <p>Updates require a published GitHub release. Release lookup allows 30 seconds; each asset download allows five minutes. Downloaded release assets are verified against <code>SHA256SUMS</code>.</p>
         <ul>
           <li><strong>npm:</strong> installs the new version with <code>npm install --global</code>; that version must also be published to npm.</li>
-          <li><strong>Windows setup:</strong> launches the new installer after the current process exits.</li>
+          <li><strong>Windows setup:</strong> launches the new installer after the current process exits, targets the same installation directory and verifies its package version before logging success.</li>
           <li><strong>Debian / macOS packages:</strong> invoke <code>sudo dpkg -i</code> or <code>sudo installer</code>; administrator credentials may be required.</li>
-          <li><strong>Portable:</strong> stages and replaces the managed application, runtime, launcher, and README after exit. Old dependency directories are not merged. Rollback restores the previous files after a failed replacement; user output outside managed paths is preserved.</li>
+          <li><strong>Portable:</strong> stages and replaces the managed application, runtime, launcher, and README after exit. Old dependency directories are not merged. The installed version is checked before committing; a mismatch or replacement failure rolls back managed files. User output outside managed paths is preserved.</li>
+          <li><strong>Scoop / Homebrew:</strong> leave managed files untouched and print the owning manager's update command. Use <code>scoop update copilot-changelog</code> or <code>brew update &amp;&amp; brew upgrade copilot-changelog</code>. These channels may lag behind GitHub while their update PR is reviewed.</li>
         </ul>
-        <p>Close other running copies first. Inspect <code>.copilot-changelog-update.log</code> in the installation directory for the result. Competing updaters are blocked by <code>.copilot-changelog-update.lock</code>.</p>
+        <p>A source checkout is not an npm-global installation: running <code>npm run dev -- update</code> or <code>node dist/cli.js update</code> reports how to update and rebuild the checkout instead of installing a different copy and claiming success. Its development manifest can still say <code>0.0.1</code> while a released installer reports a tag-derived version such as <code>0.0.2</code>.</p>
+        <p>Close other running copies first. “Will be installed/applied after this process exits” means scheduled, not completed. The command prints the target directory and result-log path; use <code>update --status</code> after completion to read the recorded outcome and identify the exact copy being invoked. This diagnostic does not contact GitHub or install anything. Source checkouts and npm installs do not have a bundled updater-result log.</p>
+        <p>If a terminal still shows an old version, open a new terminal and inspect command resolution. On PowerShell use <code>Get-Command copilot-changelog -All</code>. Compare its path with the updater's target and run that target explicitly. Checks consult published stable GitHub releases, not untagged commits on <code>main</code>. Competing portable updaters are blocked by <code>.copilot-changelog-update.lock</code>.</p>
         <div class="callout warning"><strong>Interrupted portable update</strong><p>Confirm that no updater is active. Inspect the logged backup location and restore retained managed files if needed before removing the stale update lock. Do not delete recovery backups blindly.</p></div>
       </section>
 
@@ -406,7 +430,7 @@ copilot-changelog update</code></pre></div>
         <details class="faq"><summary>A slide was omitted after review</summary><p>The remaining accepted content is still written. Re-run the same dates, model, feed selection, and language settings with <code>--resume</code>. The rejected article is retried; accepted text is reused.</p></details>
         <details class="faq"><summary>Authentication, model, or request failure</summary><p>Verify Copilot access and authentication. Check the reported model availability, reduce concurrency to 1, and resume. Changing the model makes the existing checkpoint incompatible; keep it unchanged if you need to preserve completed AI work.</p></details>
         <details class="faq"><summary>Source preparation failed</summary><p>Every selected article must be readable before enrichment starts. Check the URL, feed content, and internet connection. Downloaded articles remain cached. If the diagnostic identifies an unreadable cache directory, repair its permissions or remove that specific cache after reviewing the error.</p></details>
-        <details class="faq"><summary>A run lock or damaged checkpoint remains</summary><p>For a lock, confirm the original process has stopped before removing only the reported lock file. A damaged checkpoint is preserved on resume; <code>--restart</code> discards it. Neither option bypasses an active run lock.</p></details>
+        <details class="faq"><summary>A run lock or damaged checkpoint remains</summary><p>Use <code>copilot-changelog unlock &lt;path&gt;</code> for the reported stale local run-lock file. It refuses active and unknown owners and never deletes a checkpoint. A damaged checkpoint is preserved on resume; <code>--restart</code> discards it. Neither command bypasses an active run lock.</p></details>
         <details class="faq"><summary>The CLI is not found on Windows</summary><p>Open a new terminal after installing so the updated PATH is loaded. For a portable package, invoke the launcher from its extracted directory or add that directory to PATH.</p></details>
         <details class="faq"><summary>An option is unknown or does something unexpected</summary><p>Check <code>copilot-changelog --version</code> and <code>copilot-changelog --help</code>: an installed release may be older than this source guide. Short aliases remain case-sensitive and are listed in the reference table. Use long options in scripts, and keep <code>--</code> between <code>npm run dev</code> and CLI arguments.</p></details>
         <details class="faq"><summary>Badges, documentation, or download links return 404</summary><p>The repository must be accessible and pushed, workflows must have run, and downloads require a release. Enable GitHub Pages with GitHub Actions as its source. See <a href="#github-pages">the publishing checklist</a>; local files alone do not create a public site.</p></details>
@@ -484,8 +508,39 @@ git push origin v0.0.3</code></pre></div>
         <p>The workflow resolves the tag to an exact commit, validates the version, then stamps <code>package.json</code> and <code>package-lock.json</code> in each isolated build/validation workspace before installing dependencies. It does not change the source tag or commit. All artifacts therefore contain the tagged source and the tag-derived version. Prerelease tags publish prereleases.</p>
         <div class="code-block"><div class="code-heading"><span>Recover an existing failed tag using the updated workflow</span></div><pre><code>gh workflow run release.yml --ref main --field tag=v0.0.2</code></pre></div>
         <p>First push the updated workflow to <code>main</code>. The optional <code>tag</code> dispatch input builds and publishes that existing tag; it does not move it. For <code>v0.0.2</code>, this means the original tagged source is packaged as version <code>0.0.2</code>, not newer untagged source. Rerunning an old failed run still uses its old workflow. To ship newer source, create a new tag after committing it. An already-published GitHub release is not overwritten.</p>
-        <p>Dispatch without a tag builds the selected branch using its manifest version without publishing. Publishing to npm is a separate operation; the release workflow does not run <code>npm publish</code>. Workflows use Node 24-compatible action releases and pin Linux x64 jobs to Ubuntu 24.04 instead of following <code>ubuntu-latest</code> across operating-system migrations.</p>
+        <p>Dispatch without a tag builds the selected branch using its manifest version without publishing. Successful stable releases call the <a href="#distribution">distribution workflow</a> directly after GitHub release creation. Prereleases are not submitted to package managers. Workflows use Node 24-compatible action releases and pin Linux x64 jobs to Ubuntu 24.04 instead of following <code>ubuntu-latest</code> across operating-system migrations.</p>
         <p>If a pull-request workflow has no jobs and reports that approval expired, approve a newly requested run in GitHub Actions. This is separate from a test or build failure.</p>
+      </section>
+
+      <section id="distribution" class="doc-section" aria-labelledby="distribution-title">
+        <p class="eyebrow">Build &amp; publish / Package managers</p>
+        <h2 id="distribution-title">Publish once, distribute deliberately</h2>
+        <p>After a stable GitHub release is created, <code>release.yml</code> calls <code>distribute.yml</code>. The workflow prepares all four channels without requiring publication credentials. It downloads the version-specific installer and archives, verifies every SHA-256 against the released <code>SHA256SUMS</code>, and builds the npm tarball from the exact resolved tag commit, not from newer branch code.</p>
+        <p>The workflow artifact <code>distribution-vX.Y.Z</code> contains three WinGet YAML manifests, a Scoop bucket manifest, a Homebrew formula covering macOS/Linux x64/ARM64, the npm tarball, and metadata with source commit, URLs and hashes. Artifacts are retained for 30 days; they are not automatically published to external registries. The preparation job verifies Homebrew syntax; actual registry validation and clean-machine installation tests are still required before first distribution.</p>
+        <h3>One-time repository configuration</h3>
+        <p>Set repository variables and secrets under <strong>Settings → Secrets and variables → Actions</strong>. A publication variable must equal the lowercase string <code>true</code> to enable its channel. Leave it unset to keep publication disabled. Enabling a channel without required configuration fails that job explicitly; the already-created GitHub release remains available.</p>
+        <div class="table-scroll" role="region" aria-label="Distribution configuration" tabindex="0">
+          <table><caption>Opt-in publishing settings</caption><thead><tr><th scope="col">Channel</th><th scope="col">Variables</th><th scope="col">Authentication and result</th></tr></thead><tbody>
+            <tr><th scope="row">WinGet</th><td><code>PUBLISH_WINGET=true</code>; <code>WINGET_FORK=owner/winget-pkgs</code>; optional <code>WINGET_PACKAGE_ID</code> (default <code>congiuluc.CopilotChangelog</code>).</td><td><code>WINGET_TOKEN</code> secret; opens a PR from your existing fork into <code>microsoft/winget-pkgs</code>.</td></tr>
+            <tr><th scope="row">npm</th><td><code>PUBLISH_NPM=true</code>.</td><td>npm trusted publishing via GitHub OIDC; publishes <code>copilot-changelog-cli</code> with provenance. No npm token is stored.</td></tr>
+            <tr><th scope="row">Scoop</th><td><code>PUBLISH_SCOOP=true</code>; <code>SCOOP_BUCKET=owner/scoop-bucket</code>.</td><td><code>SCOOP_TOKEN</code> secret; opens a PR updating <code>bucket/copilot-changelog.json</code> in your existing bucket.</td></tr>
+            <tr><th scope="row">Homebrew</th><td><code>PUBLISH_HOMEBREW=true</code>; <code>HOMEBREW_TAP=owner/homebrew-tools</code>.</td><td><code>HOMEBREW_TOKEN</code> secret; opens a PR updating <code>Formula/copilot-changelog.rb</code> in your existing tap.</td></tr>
+          </tbody></table>
+        </div>
+        <h3>WinGet, Scoop and Homebrew setup</h3>
+        <p>Create and initialize the fork/bucket/tap repositories before enabling publication. Installer/archive URLs must be publicly downloadable without authentication. WinGet requires a genuine fork of <code>microsoft/winget-pkgs</code>; the default package identifier is a proposal, not an existing registration or a guarantee of acceptance. Confirm the identifier and installer metadata before the first submission. The current installer is per-user, x64, Inno Setup, with the stable application ID recorded in the generated manifest.</p>
+        <p>Tokens must be able to read the target repository, write branches in the publication repository, and open pull requests. For your own Scoop/Homebrew repositories, a fine-grained token or GitHub App token with Contents and Pull requests read/write is suitable. WinGet cross-fork submission needs credentials permitted to create a fork branch and an upstream PR; a classic token with <code>public_repo</code> is one option. Use the narrowest workable permissions and never place tokens in manifests or command-line arguments.</p>
+        <p>The workflow opens reviewable PRs, not automatic merges. For first WinGet submission, validate the generated manifests and test install, upgrade, uninstall and PATH behavior in a clean Windows environment. WinGet community checks and approval determine availability. Scoop/Homebrew users must add your bucket/tap after you merge its initial package PR. These are personal repositories, not automatic submissions to Scoop Main or Homebrew Core.</p>
+        <h3>npm trusted publishing</h3>
+        <p>Ensure you own the <code>copilot-changelog-cli</code> npm package. If it does not yet exist, bootstrap its first publication manually from a reviewed package; then configure trusted publishers in its npm package settings. Match this GitHub owner/repository exactly. The automatic reusable-workflow route validates the calling workflow filename, so configure <code>release.yml</code>; add a second trusted publisher for <code>distribute.yml</code> if you want manual retry publication.</p>
+        <p>The npm job uses GitHub-hosted runners, <code>id-token: write</code> in the caller and publisher, and npm 11.5.1 or later. Newly configured npm trust must be used before its configuration expires; consult <a href="https://docs.npmjs.com/trusted-publishers/">npm's trusted publishing guide</a>. The package repository URL must match the publishing repository. The prepared tarball is published with scripts disabled; no packaging lifecycle runs with publication credentials.</p>
+        <p>For accurate npm provenance, the workflow commit must equal the packaged release commit. Normal tag-triggered releases satisfy this. A manual retry for npm should use <code>--ref vX.Y.Z</code> when that tag already contains the distribution workflow. Recovery from <code>main</code> can prepare older tags and submit registry PRs, but npm publication stops if the commits differ rather than attributing an old package to new source. Publish a new tag to distribute updated source through all channels.</p>
+        <h3>Retry after configuration or review</h3>
+        <div class="code-block"><div class="code-heading"><span>Distribute an already-published stable release whose tag includes this workflow</span></div><pre><code>gh workflow run distribute.yml --ref v0.0.3 --field tag=v0.0.3
+# Manifest-only recovery using newer tooling:
+gh workflow run distribute.yml --ref main --field tag=v0.0.3</code></pre></div>
+        <p>Use a real published stable tag after pushing these workflows to the selected branch. Manual distribution does not create or replace the GitHub release. Drafts, prereleases, missing assets and moved tags relative to the calling release's recorded commit are rejected. An identical open registry PR is reused; a conflicting branch, closed PR or conflicting published WinGet version fails for manual review. npm retries skip an already-published version only when its integrity exactly matches the prepared tarball.</p>
+        <div class="callout warning"><strong>Published versions are immutable</strong><p>Never replace release binaries after checksums or registry manifests are published. Create a new version instead. A post-release distribution failure does not delete the release and does not imply that all enabled channels failed; inspect each job before retrying. This project does not create forks, buckets, taps, npm accounts or trusted-publisher registrations automatically.</p></div>
       </section>
 
       <section id="github-pages" class="doc-section" aria-labelledby="pages-title">

@@ -68,10 +68,12 @@ export function isRtlLocale(locale: SupportedLanguage): boolean {
 }
 
 const detailKeys = [...new Set(Object.values(sectionDetailKeys).flat())];
+export const localizationTextMaximumCharacters = 2000;
+export const localizedArticleTitleMaximumCharacters = 200;
 
 function strings<K extends string>(value: unknown, keys: readonly K[], name: string): Record<K, string> {
   if (!isRecord(value) || keys.some((key) => typeof value[key] !== "string" ||
-    !value[key].trim() || value[key].length > 2000)) {
+    !value[key].trim() || value[key].length > localizationTextMaximumCharacters)) {
     throw new LocalizationValidationError(`${name} must contain nonempty translated strings for: ${keys.join(", ")}.`);
   }
   return Object.fromEntries(keys.map((key) => [key, value[key]])) as Record<K, string>;
@@ -85,8 +87,8 @@ export function parseLocalization(value: unknown): DeckLocalization | undefined 
   for (const key of ["articleTitle", "evidenceHeading"] as const) {
     if (value[key] !== undefined) result[key] = strings(value, [key], "localization")[key];
   }
-  if (result.articleTitle && result.articleTitle.length > 200) {
-    throw new LocalizationValidationError("localization.articleTitle must be at most 200 characters.");
+  if (result.articleTitle && result.articleTitle.length > localizedArticleTitleMaximumCharacters) {
+    throw new LocalizationValidationError(`localization.articleTitle must be at most ${localizedArticleTitleMaximumCharacters} characters.`);
   }
   if (value.slides !== undefined) {
     if (!isRecord(value.slides) || !isCanonicalLocale(value.slides.locale) || !isRecord(value.slides.text)) {
@@ -174,7 +176,12 @@ export function localizationPrompt(slidesLocale: SupportedLanguage, notesLocales
   }
   return [
     `Also return localization using this exact key structure: ${JSON.stringify(shape)}.`,
-    `Translate localization.articleTitle, localization.evidenceHeading and all localization.slides.text values into ${localeName(slidesLocale)} (${slidesLocale}); preserve property names and locale tags. Keep titles and card labels concise.`,
-    "Translate each localization.speakerNotes entry into its keyed locale, retaining literal {count}, {from} and {to} placeholders. These are neutral cover/section introductions, not additional article claims.",
+    `Every localization string must be nonempty and at most ${localizationTextMaximumCharacters} characters. Keep every key in the supplied localization template; translate values only.`,
+    ...(!builtinLanguage(slidesLocale) ? [
+      `Translate localization.articleTitle, localization.evidenceHeading and all localization.slides.text values into ${localeName(slidesLocale)} (${slidesLocale}); preserve property names and locale tags. localization.articleTitle must be at most ${localizedArticleTitleMaximumCharacters} characters. Keep slide titles and card labels concise.`,
+    ] : []),
+    ...(customNotes.length ? [
+      "Translate each localization.speakerNotes entry into its keyed locale. Each introduction must retain literal {count}, {from} and {to}; every section introduction must retain {count}. These are neutral cover/section introductions, not additional article claims.",
+    ] : []),
   ];
 }

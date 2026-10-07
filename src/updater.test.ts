@@ -9,6 +9,7 @@ import {
   detectInstallation,
   selectAssetName,
   updateCli,
+  windowsInstallerUpdateScript,
 } from "./updater.js";
 
 vi.mock("node:child_process", () => ({ spawn: vi.fn(), spawnSync: vi.fn() }));
@@ -32,6 +33,73 @@ const newerRelease = () => new Response(JSON.stringify({
   html_url: "https://github.com/congiuluc/github-updates-cli/releases/tag/v1.1.0",
   assets: [],
 }));
+
+test("status identifies the exact installed copy and reads update failures without networking", async () => {
+  const root = "C:\\Users\\me\\AppData\\Local\\Programs\\Copilot Changelog CLI";
+  const environment = {
+    platform: "win32" as const, arch: "x64", execPath: `${root}\\runtime\\node.exe`,
+    cliPath: `${root}\\app\\node_modules\\copilot-changelog-cli\\dist\\cli.js`,
+  };
+  vi.mocked(readFile).mockResolvedValue("\uFEFFUpdate failed: installed version is still 0.0.1.");
+  const fetchImpl = vi.fn();
+  const status = await updateCli("0.0.1", { statusOnly: true, environment, fetchImpl });
+  expect(status).toContain("CLI version: 0.0.1");
+  expect(status).toContain(environment.cliPath);
+  expect(status).toContain("Installation: windows-installer");
+  expect(status).toContain("Update failed: installed version is still 0.0.1");
+  expect(readFile).toHaveBeenCalledWith(`${root}\\.copilot-changelog-update.log`, "utf8");
+  expect(fetchImpl).not.toHaveBeenCalled();
+  expect(spawnSync).not.toHaveBeenCalled();
+});
+
+test("missing update logs are explicit and unreadable logs remain errors", async () => {
+  const environment = { platform: "linux" as const, arch: "x64", execPath: "/opt/copilot-changelog/runtime/node" };
+  vi.mocked(readFile).mockRejectedValueOnce(Object.assign(new Error("Missing"), { code: "ENOENT" }));
+  expect(await updateCli("1.0.0", { statusOnly: true, environment })).toContain("No update helper result");
+  vi.mocked(readFile).mockRejectedValueOnce(Object.assign(new Error("Denied"), { code: "EACCES" }));
+  await expect(updateCli("1.0.0", { statusOnly: true, environment })).rejects.toThrow("Denied");
+  await expect(updateCli("1.0.0", { statusOnly: true, checkOnly: true, environment })).rejects.toThrow("cannot be used together");
+});
+
+test("source-checkout updates never pretend an npm global installation updated the checkout", async () => {
+  const environment = { platform: "win32" as const, arch: "x64",
+    execPath: "C:\\node\\node.exe", cliPath: "D:\\source\\dist\\cli.js" };
+  expect(detectInstallation(environment)).toEqual({ type: "source" });
+  const fetchImpl = vi.fn();
+  await expect(updateCli("0.0.1", { environment, fetchImpl })).rejects.toThrow("npm-global update cannot change this source copy");
+  expect(fetchImpl).not.toHaveBeenCalled();
+  expect(spawnSync).not.toHaveBeenCalled();
+});
+
+test("Windows installer helpers target and verify the same installation before logging success", () => {
+  const root = "C:\\Users\\person's account\\AppData\\Local\\Programs\\Copilot Changelog CLI";
+  const script = windowsInstallerUpdateScript(root, "C:\\download\\setup.exe", "C:\\download\\staging", "1.2.3", 123);
+  expect(script).toContain("Wait-Process -Id 123");
+  expect(script).toContain('/DIR="C:\\Users\\person\'\'s account\\AppData\\Local\\Programs\\Copilot Changelog CLI"');
+  expect(script).toContain("app\\node_modules\\copilot-changelog-cli\\package.json");
+  expect(script).toContain("$installedVersion -ne '1.2.3'");
+  expect(script.indexOf("$installedVersion -ne")).toBeLessThan(script.indexOf("Update completed successfully"));
+  expect(script).toContain("$exitCode = 1");
+  expect(script).toContain("Update failed:");
+});
+
+test.each([
+  ["scoop", "win32", "C:\\Users\\person\\scoop\\apps\\copilot-changelog\\current\\runtime\\node.exe", "scoop update copilot-changelog"],
+  ["scoop", "win32", "D:\\tools\\apps\\copilot-changelog\\0.0.3\\runtime\\node.exe", "scoop update copilot-changelog"],
+  ["homebrew", "darwin", "/opt/homebrew/Cellar/copilot-changelog/0.0.3/libexec/runtime/node", "brew update && brew upgrade copilot-changelog"],
+  ["homebrew", "linux", "/home/linuxbrew/.linuxbrew/Cellar/copilot-changelog/0.0.3/libexec/runtime/node", "brew update && brew upgrade copilot-changelog"],
+] as const)("preserves %s managed files at %s %s", async (manager, platform, execPath, command) => {
+  const environment = { platform, arch: "x64", execPath };
+  expect(detectInstallation(environment).type).toBe(manager);
+  const fetchImpl = vi.fn().mockImplementation(newerRelease);
+  expect(await updateCli("0.0.3", { environment, fetchImpl })).toContain(command);
+  expect(fetchImpl).not.toHaveBeenCalled();
+  expect(spawnSync).not.toHaveBeenCalled();
+  expect(spawn).not.toHaveBeenCalled();
+  expect(mkdtemp).not.toHaveBeenCalled();
+  expect(await updateCli("0.0.3", { environment, fetchImpl, checkOnly: true })).toContain(command);
+  expect(selectAssetName("1.1.0", manager, platform, "x64")).toBeUndefined();
+});
 
 function processResult(status: number | null, error?: Error): ReturnType<typeof spawnSync> {
   return { pid: 1, output: [], stdout: Buffer.alloc(0), stderr: Buffer.alloc(0), status, signal: null, error };
@@ -267,4 +335,34 @@ test("checks for a newer release without installing it", async () => {
       environment: { platform: "linux", arch: "x64", execPath: "/usr/bin/node" },
     }),
   ).resolves.toContain("Update available: 1.0.0 -> 1.1.0");
+});
+
+test("failed downloads drain peer writes before staging cleanup", async () => {
+  vi.mocked(mkdtemp).mockResolvedValue(`${process.cwd()}\\.updater-test`);
+  let releasePeer!: () => void;
+  let peerStarted!: () => void;
+  const started = new Promise<void>((resolve) => { peerStarted = resolve; });
+  const pending = new Promise<void>((resolve) => { releasePeer = resolve; });
+  const update = updateCli("1.0.0", {
+    environment: { platform: "linux", arch: "x64", execPath: "/opt/copilot-changelog/runtime/node" },
+    fetchImpl: async (url) => {
+      if (String(url).includes("api.github.com")) {
+        return Response.json({ tag_name: "v1.1.0", assets: [
+          { name: "copilot-changelog_1.1.0_amd64.deb", browser_download_url: "https://example.com/app.deb" },
+          { name: "SHA256SUMS", browser_download_url: "https://example.com/sums" },
+        ] });
+      }
+      if (String(url).endsWith("app.deb")) return new Response("", { status: 503 });
+      peerStarted();
+      await pending;
+      return new Response("checksum data");
+    },
+  });
+  const assertion = expect(update).rejects.toThrow("Download failed");
+  await started;
+  expect(rm).not.toHaveBeenCalled();
+  releasePeer();
+  await assertion;
+  expect(rm).toHaveBeenCalledWith(`${process.cwd()}\\.updater-test`, { recursive: true, force: true });
+  expect(spawnSync).not.toHaveBeenCalled();
 });

@@ -937,7 +937,8 @@ test("enriches articles with bounded parallelism while preserving order", async 
 });
 
 test.each([
-  { concurrency: undefined, expectedConcurrency: 1 },
+  { concurrency: undefined, expectedConcurrency: 3 },
+  { concurrency: 1, expectedConcurrency: 1 },
   { concurrency: 2, expectedConcurrency: 2 },
 ])("uses one client and independent article sessions with concurrency $concurrency", async ({ concurrency, expectedConcurrency }) => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
@@ -964,7 +965,7 @@ test.each([
     stop: vi.fn().mockResolvedValue(undefined),
     createSession: vi.fn(async (config) => {
       expect(config?.availableTools).toEqual([]);
-      if (concurrency === undefined) expect(activeSessions).toBe(0);
+      if (concurrency === 1) expect(activeSessions).toBe(0);
       const sessionIndex = sessionsCreated++;
       maximumActiveSessions = Math.max(maximumActiveSessions, ++activeSessions);
       return {
@@ -988,6 +989,8 @@ test.each([
     changelogPost("Copilot workflow update one", "The workflow now provides clearer guidance."),
     changelogPost("Copilot workflow update two", "The workflow now supports simpler adoption."),
     changelogPost("Copilot workflow update three", "The workflow now improves team coordination."),
+    changelogPost("Copilot workflow update four", "The workflow provides guidance for related tasks."),
+    changelogPost("Copilot workflow update five", "The workflow documents the required setup."),
   ];
   const clientFactory = vi.fn(() => client);
 
@@ -1006,8 +1009,8 @@ test.each([
   expect(maximumActiveRequests).toBe(expectedConcurrency);
   expect(maximumActiveSessions).toBe(expectedConcurrency);
   expect(activeSessions).toBe(0);
-  expect(disconnectedSessions.sort()).toEqual([0, 1, 2]);
-  expect(sessionsCreated).toBe(3);
+  expect(disconnectedSessions.sort()).toEqual([0, 1, 2, 3, 4]);
+  expect(sessionsCreated).toBe(5);
   expect(results.map((post) => post.title)).toEqual(posts.map((post) => post.title));
 });
 
@@ -1082,12 +1085,13 @@ test("downloads article images while Copilot content is being generated", async 
     createSession: vi.fn(async () => ({
       sendAndWait: async ({ prompt }) => {
         expect(prompt).toContain("44 words and 300 characters");
-        expect(prompt).toContain("Models keyCapabilities and useGuidance, IDE keyCapabilities and howToUse, and Retirements reasons and replacement");
-        expect(prompt).toContain("28-34 words per card, at most 36 words and 250 characters");
+        expect(prompt).toContain("details.announcement: at most 44 words and 300 characters; at least 6 meaningful words");
+        expect(prompt).toContain("details.impact: at most 44 words and 300 characters; at least 8 meaningful words");
         expect(prompt).toContain("keep prerequisites and caveats needed to act correctly on the slide");
-        expect(prompt).toContain("concrete workloads and source-stated limitations or trade-offs");
-        expect(prompt).toContain("essential setup or prerequisite");
-        expect(prompt).toContain("required migration action or verification");
+        expect(prompt).toContain("required action or essential constraints");
+        expect(prompt).not.toContain("\n\nModels:");
+        expect(prompt).not.toContain("\n\nIDE:");
+        expect(prompt).not.toContain("\n\nRetirements:");
         expect(prompt).toContain("Never invent details to fill space");
         await new Promise((resolve) => setTimeout(resolve, 20));
         generationFinished = true;
@@ -1419,6 +1423,7 @@ test("omits a slide that fails final review and continues with the next article"
   const result = await enrichWithCopilot([first, second], {
     model: "auto",
     useAi: true,
+    concurrency: 1,
     slidesLanguage: "en",
     speakerNotesLanguages: ["en"],
     clientFactory: () => client,

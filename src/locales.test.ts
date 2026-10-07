@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import {
   builtinLanguage, isCanonicalLocale, isRtlLocale, localeName, localizationIssues,
   localizationPrompt, normalizeLocale, parseLocalization,
+  localizedArticleTitleMaximumCharacters, localizationTextMaximumCharacters,
 } from "./locales.js";
 import { slideContentIssues, type GeneratedContent } from "./enricher.js";
 
@@ -30,6 +31,17 @@ test("recognizes regional built-in languages, right-to-left scripts and localiza
   expect(localizationPrompt("fr-CA", ["ja", "ar"]).join(" ")).toContain("localization");
   expect(localizationIssues(undefined, "fr-CA", ["ja"])).toContain("localization.speakerNotes.ja is required");
   expect(() => parseLocalization({ slides: { locale: "fr", text: {} } })).toThrow("translated strings");
+});
+
+test("optional localization instructions match their shape and parser limits", () => {
+  const translatedSlides = localizationPrompt("fr", ["en"]).join("\n");
+  expect(translatedSlides).toContain(`localization.articleTitle must be at most ${localizedArticleTitleMaximumCharacters} characters`);
+  expect(translatedSlides).toContain(`at most ${localizationTextMaximumCharacters} characters`);
+  expect(translatedSlides).not.toContain("Translate each localization.speakerNotes");
+  const translatedNotes = localizationPrompt("en", ["ja"]).join("\n");
+  expect(translatedNotes).toContain("every section introduction must retain {count}");
+  expect(translatedNotes).not.toContain("Translate localization.articleTitle");
+  expect(translatedNotes).not.toContain('"slides":');
 });
 
 test.each([

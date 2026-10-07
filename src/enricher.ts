@@ -1,6 +1,8 @@
 import type { CopilotClient } from "@github/copilot-sdk";
 import { load } from "cheerio";
 import { buildEnrichmentPrompt } from "./enrichment-prompt.js";
+import { writeConsoleMessage, type MessageKind } from "./console-output.js";
+import { detailContentLimits, slideContentLimits, titleDetailKeys } from "./content-rules.js";
 import {
   evidenceIssues, mergeRegeneratedContent, parseEvidence,
   type Audience, type RegenerationTarget,
@@ -12,7 +14,7 @@ import { createUsageTracker, CreditLimitError, emptyAiUsage, type AiUsage, type 
 import {
   sections,
   sectionDetailKeys,
-  explanatoryDetailKeys,
+  DEFAULT_ENRICHMENT_CONCURRENCY,
   type ChangelogPost,
   type EnrichedPost,
   type GeneratedContent,
@@ -99,7 +101,7 @@ export interface EnrichmentOptions {
   trace?: (event: EnrichmentTraceEvent) => Promise<void>;
   traceLogPath?: string;
   onProgress?: (event: EnrichmentTraceEvent) => void;
-  onMessage?: (message: string) => void;
+  onMessage?: (message: string, kind?: MessageKind) => void;
   /** Receives whole-invocation snapshots, not per-request usage deltas. */
   onUsage?: (usage: AiUsage) => Promise<void>;
   maximumNanoAiu?: number;
@@ -157,13 +159,6 @@ async function resolveModelId(
     }.`,
   );
 }
-
-const titleDetailKeys = new Set<SlideDetailKey>([
-  "modelName",
-  "subject",
-  "feature",
-  "announcement",
-]);
 
 const benefitOrientedActionPattern =
   /^(?:(?:access|add|allow|accelerate|apply|automate|boost|bring|build|catch|choose|clarify|connect|control|coordinate|create|customi[sz]e|cut|debug|deliver|detect|discover|edit|enable|enforce|enhance|expand|find|generate|govern|help|improve|introduce|let|maintain|manage|moderni[sz]e|monitor|navigate|optimi[sz]e|organi[sz]e|pin|prepare|protect|provide|publish|reduce|review|run|select|share|simplify|speed|standardi[sz]e|streamline|strengthen|support|surface|track|tune|unlock|update|use|validate)(?:s|es)?|(?:accedi|accelera|aggiorna|aggiunge|abilita|applica|automatizza|chiarisce|collega|condividi|consente|controlla|coordina|crea|fornisce|genera|gestisce|governa|individua|migliora|modernizza|monitora|naviga|organizza|ottimizza|permette|potenzia|prepara|pubblica|regola|riduce|rende|semplifica|standardizza|supporta|valida|velocizza))\b/i;
@@ -340,8 +335,9 @@ export function slideContentIssues(
   if (expectedSection && content.section !== expectedSection) {
     issues.push(`section must be ${expectedSection}`);
   }
-  if (wordCount(content.summary, slidesLanguage) > 32 || content.summary.length > 220) {
-    issues.push("summary must be at most 32 words and 220 characters");
+  const summaryLimits = slideContentLimits.summary;
+  if (wordCount(content.summary, slidesLanguage) > summaryLimits.maximumWords || content.summary.length > summaryLimits.maximumCharacters) {
+    issues.push(`summary must be at most ${summaryLimits.maximumWords} words and ${summaryLimits.maximumCharacters} characters`);
   }
   if (
     /[\r\n]/.test(content.summary) ||
@@ -360,12 +356,13 @@ export function slideContentIssues(
   ) {
     issues.push("summary must not repeat the full article title");
   }
-  if (content.notes.length < 2 || content.notes.length > 4) {
-    issues.push("notes must contain 2-4 bullets");
+  if (content.notes.length < slideContentLimits.minimumNotes || content.notes.length > slideContentLimits.maximumNotes) {
+    issues.push(`notes must contain ${slideContentLimits.minimumNotes}-${slideContentLimits.maximumNotes} bullets`);
   }
   content.notes.forEach((note, index) => {
-    if (wordCount(note, slidesLanguage) > 16 || note.length > 110) {
-      issues.push(`note ${index + 1} must be at most 16 words and 110 characters`);
+    const noteLimits = slideContentLimits.note;
+    if (wordCount(note, slidesLanguage) > noteLimits.maximumWords || note.length > noteLimits.maximumCharacters) {
+      issues.push(`note ${index + 1} must be at most ${noteLimits.maximumWords} words and ${noteLimits.maximumCharacters} characters`);
     }
     if (/[\r\n]|\.{3}|…/.test(note) || (lexicalRules && endsWithDanglingWord(note))) {
       issues.push(`note ${index + 1} must be a complete standalone phrase without ellipses`);
@@ -373,12 +370,7 @@ export function slideContentIssues(
   });
   for (const key of sectionDetailKeys[content.section]) {
     const value = content.details[key] ?? "";
-    const expanded =
-      (content.section === "Announcements" || content.section === "Enterprise Admins") &&
-      (key === "announcement" || key === "impact");
-    const explanatory = explanatoryDetailKeys.has(key);
-    const maximumWords = expanded ? 44 : explanatory ? 36 : titleDetailKeys.has(key) ? 18 : 26;
-    const maximumCharacters = expanded ? 300 : explanatory ? 250 : titleDetailKeys.has(key) ? 130 : 170;
+    const { maximumWords, maximumCharacters } = detailContentLimits(content.section, key);
     if (wordCount(value, slidesLanguage) > maximumWords || value.length > maximumCharacters) {
       issues.push(`${key} must be at most ${maximumWords} words and ${maximumCharacters} characters`);
     }
@@ -390,8 +382,8 @@ export function slideContentIssues(
       issues.push(`${key} must be a complete standalone phrase without filler or ellipses`);
     }
     // Commas can separate model names, dates, or qualifiers within one point.
-    if (value.split(/[;；؛]/u).filter((point) => point.trim()).length > 3) {
-      issues.push(`${key} must prioritize 2-3 semicolon-separated points instead of an exhaustive list`);
+    if (value.split(/[;；؛]/u).filter((point) => point.trim()).length > slideContentLimits.maximumDetailPoints) {
+      issues.push(`${key} must prioritize 2-${slideContentLimits.maximumDetailPoints} semicolon-separated points instead of an exhaustive list`);
     }
     if (
       lexicalRules && key === "availability" &&
@@ -405,10 +397,10 @@ export function slideContentIssues(
     ) {
       issues.push("keyCapabilities must begin with a benefit-oriented action");
     }
-    if (lexicalRules && key === "announcement" && wordCount(value) < 6) {
+    if (lexicalRules && key === "announcement" && wordCount(value) < slideContentLimits.minimumAnnouncementWords) {
       issues.push("announcement must state the specific change, not only name its topic");
     }
-    if (lexicalRules && key === "impact" && wordCount(value) < 8) {
+    if (lexicalRules && key === "impact" && wordCount(value) < slideContentLimits.minimumImpactWords) {
       issues.push("impact must cover the main consequence and required action");
     }
     if (
@@ -798,7 +790,7 @@ export async function enrichWithCopilot(
 ): Promise<EnrichedPost[]> {
   let client: EnrichmentCopilotClient | undefined;
   let modelId = options.model;
-  const workerCount = Math.min(options.concurrency ?? 1, Math.max(posts.length, 1));
+  const workerCount = Math.min(options.concurrency ?? DEFAULT_ENRICHMENT_CONCURRENCY, Math.max(posts.length, 1));
   const requestTimeoutMs = options.requestTimeoutMs ?? 180_000;
   if (!Number.isSafeInteger(requestTimeoutMs) || requestTimeoutMs < 1 || requestTimeoutMs > 2_147_483_647) {
     throw new Error("Copilot request timeout must be a positive whole number of milliseconds no greater than 2147483647.");
@@ -809,7 +801,7 @@ export async function enrichWithCopilot(
   });
   let budgetPause: CreditLimitError | undefined;
   const requiresAi = options.useAi && (posts.length === 0 || posts.some((post) => !options.acceptedContent?.has(post.url)));
-  const writeMessage = options.onMessage ?? ((message: string) => { process.stderr.write(message); });
+  const writeMessage = options.onMessage ?? writeConsoleMessage;
   const reportTrace = async (event: EnrichmentTraceEvent) => {
     options.onProgress?.(event);
     await options.trace?.(event);
@@ -836,7 +828,7 @@ export async function enrichWithCopilot(
         new CopilotRequestTimeoutError(requestTimeoutMs, "runtime startup"));
       modelId = await withTimeout(resolveModelId(client, options.model), requestTimeoutMs,
         new CopilotRequestTimeoutError(requestTimeoutMs, "model discovery"));
-      writeMessage(`Copilot runtime ready in ${((Date.now() - startedAt) / 1000).toFixed(1)}s; response timeout ${requestTimeoutMs / 1000}s.\n`);
+      writeMessage(`Copilot runtime ready in ${((Date.now() - startedAt) / 1000).toFixed(1)}s; response timeout ${requestTimeoutMs / 1000}s.\n`, "success");
     }
     const enriched = new Array<EnrichedPost>(posts.length);
     let nextIndex = 0;
@@ -898,6 +890,7 @@ export async function enrichWithCopilot(
         : findArticleImage(post)).catch(async (error: unknown) => {
           writeMessage(
             `Warning: image download failed for "${post.title}": ${error instanceof Error ? error.message : String(error)}\n`,
+            "warning",
           );
           await reportTrace({
             event: "image_download_failed",
@@ -1038,6 +1031,7 @@ export async function enrichWithCopilot(
       }
       if (!options.onProgress) writeMessage(
         `Completed ${completionNumber}/${posts.length} · active ${activeEnrichments}/${workerCount}: ${post.title}\n`,
+        "success",
       );
     };
     const workers = Array.from({ length: workerCount }, async (_, workerIndex) => {
@@ -1053,7 +1047,7 @@ export async function enrichWithCopilot(
           if (error instanceof CreditLimitError) {
             stopStarting = true;
             budgetPause = error;
-            writeMessage(`Warning: ${error.message}\n`);
+            writeMessage(`Warning: ${error.message}\n`, "warning");
             await options.onBudgetPaused?.(error);
             await reportTrace({
               event: "article_processing_paused", articleTitle: posts[index].title, worker, error: error.message,
@@ -1072,7 +1066,7 @@ export async function enrichWithCopilot(
               error.message,
             ].join("\n");
             try {
-              writeMessage(`${message}\n`);
+              writeMessage(`${message}\n`, "warning");
               await reportTrace({
                 event: "article_review_skipped",
                 articleTitle: skippedPost?.title ?? "Unknown article",

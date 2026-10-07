@@ -1,11 +1,10 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { hostname } from "node:os";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { sections, sectionDetailKeys, type Section, type EnrichedPost, type SupportedLanguage } from "./types.js";
 import { isAiUsage, type AiUsage } from "./usage.js";
 import { isAudience, type Audience } from "./generation.js";
 import { isCanonicalLocale, localizationIssues, parseLocalization, LocalizationValidationError } from "./locales.js";
+export { withRunLock } from "./run-lock.js";
 
 export interface CheckpointConfig {
   contentVersion: number;
@@ -27,68 +26,6 @@ export interface CheckpointState {
 }
 
 export type ExistingRunAction = "resume" | "restart";
-
-/**
- * Hold an exclusive per-run lock until all work and cleanup finish.
- * Never reclaim a stale lock automatically: another host may own it.
- */
-export async function withRunLock<T>(path: string, operation: () => Promise<T>): Promise<T> {
-  await mkdir(dirname(path), { recursive: true });
-  const owner = JSON.stringify({ pid: process.pid, hostname: hostname(), token: randomUUID() });
-  const handle = await open(path, "wx", 0o600).catch(async (error: unknown) => {
-    if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw error;
-    let description = "An existing or incomplete run lock was found";
-    try {
-      const previous: unknown = JSON.parse(await readFile(path, "utf8"));
-      if (isRecord(previous) && Number.isSafeInteger(previous.pid) &&
-          typeof previous.pid === "number" && previous.pid > 0 &&
-          previous.hostname === hostname()) {
-        try {
-          process.kill(previous.pid, 0);
-          description = `A run is already running (PID ${previous.pid})`;
-        } catch (probeError) {
-          if (!(probeError instanceof Error) || !("code" in probeError)) throw probeError;
-          if (probeError.code === "ESRCH") description = `A stale run lock from PID ${previous.pid} was found`;
-          else if (probeError.code === "EPERM") description = `A run is already running (PID ${previous.pid})`;
-          else throw probeError;
-        }
-      }
-    } catch (readError) {
-      if (!(readError instanceof SyntaxError) &&
-          !(readError instanceof Error && "code" in readError && readError.code === "ENOENT")) {
-        throw new Error(`Could not inspect run lock ${path}: ${String(readError)}`, { cause: readError });
-      }
-    }
-    throw new Error(
-      `${description}: ${path}. Remove this lock only after confirming no run is active, then retry with --resume. --restart does not override a run lock.`,
-    );
-  });
-  let failure: { error: unknown } | undefined;
-  let ownerWritten = false;
-  try {
-    try {
-      await handle.writeFile(owner, "utf8");
-      ownerWritten = true;
-    } finally {
-      await handle.close();
-    }
-    return await operation();
-  } catch (error) {
-    failure = { error };
-    throw error;
-  } finally {
-    try {
-      if (ownerWritten && await readFile(path, "utf8") !== owner) {
-        throw new Error(`Run lock ownership changed; preserving ${path}.`);
-      }
-      await rm(path);
-    } catch (error) {
-      if (!failure) throw error;
-      throw new AggregateError([failure.error, error],
-        `${String(failure.error)}\nRun lock cleanup also failed: ${String(error)}`, { cause: failure.error });
-    }
-  }
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

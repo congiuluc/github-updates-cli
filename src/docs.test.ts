@@ -86,6 +86,18 @@ test("every declared option has a unique short alias documented with its long na
   expect(readme).toContain("--from 2026-08-01 --to 2026-08-31");
 });
 
+test("distribution documentation distinguishes generated files, opted-in publication and manual review", () => {
+  const guide = $("#distribution").text();
+  for (const key of ["PUBLISH_WINGET", "PUBLISH_NPM", "PUBLISH_SCOOP", "PUBLISH_HOMEBREW",
+    "WINGET_FORK", "WINGET_PACKAGE_ID", "WINGET_TOKEN", "SCOOP_BUCKET", "SCOOP_TOKEN", "HOMEBREW_TAP", "HOMEBREW_TOKEN"]) {
+    expect(guide).toContain(key);
+  }
+  expect(guide).toContain("reviewable PRs, not automatic merges");
+  expect(guide).toContain("No npm token is stored");
+  expect(guide).toContain("workflow commit must equal the packaged release commit");
+  expect(guide).toContain("identical open registry PR is reused");
+  expect(guide).toContain("publicly downloadable without authentication");
+});
 test("documentation command examples use long options and describe unrestricted locale tags", () => {
   const samples = $("code").toArray().map((element) => $(element).text())
     .filter((text) => text.includes("copilot-changelog ") || text.includes("npm run dev --"));
@@ -114,6 +126,14 @@ test("documentation has accessible fallbacks without JavaScript", () => {
   for (const table of $("table").toArray()) expect($(table).find("caption").text()).not.toBe("");
 });
 
+test("management documentation explains update status and conservative stale-lock recovery", () => {
+  expect($("#cli-reference").text()).toContain("-L, --status");
+  expect($("#cli-reference").text()).toContain("copilot-changelog unlock <path>");
+  expect($("#updates").text()).toContain("scheduled, not completed");
+  expect($("#updates").text()).toContain("Get-Command copilot-changelog -All");
+  expect($("#resume").text()).toContain("There is no force option");
+  expect($("#resume").text()).toContain("Checkpoints and caches are never deleted");
+});
 test("installation and presentation guidance matches current authentication and validation behavior", () => {
   expect($("#install").text()).toContain("/login");
   expect($("#install").text()).toContain("Copilot Requests");
@@ -123,12 +143,31 @@ test("installation and presentation guidance matches current authentication and 
   expect(readme).toContain("published releases may lag behind");
 });
 
+test("console documentation describes clickable output and color/plain-text behavior", () => {
+  expect($("#outputs").text()).toContain("Open deck");
+  expect($("#outputs").text()).toContain("Ctrl+click");
+  expect($("#outputs").text()).toContain("same command with --resume");
+  expect($("#outputs").text()).toContain("Review-only mode links to the editable JSON");
+  expect($("#usage").text()).toContain("cyan for information");
+  expect($("#timeouts").text()).toContain("Verbose JSON trace lines are never colored or rewritten");
+  expect($("#timeouts").text()).toContain("WinGet-style block progress bar");
+  expect($("#timeouts").text()).toContain("not a guessed percentage of a model response");
+  expect($("#timeouts").text()).toContain("timer stops on completion");
+  expect(readme).toContain("NO_COLOR");
+});
 test("printing includes sections hidden by topic navigation", async () => {
   const css = await readFile(resolve(docsRoot, "assets", "docs.css"), "utf8");
   expect(css).toMatch(/@media print\s*\{\s*\.doc-section\[hidden\]\s*\{\s*display:\s*block\s*!important;/);
   expect($("#contents summary").text()).toContain("Documentation topics");
 });
 
+test("first-attempt guidance documents shared limits without promising retry-free generation", () => {
+  const review = $("#review").text();
+  expect(review).toContain("only the assigned section");
+  expect(review).toContain("exact hard word/character limits");
+  expect(review).toContain("do not guarantee a valid first answer");
+  expect(review).toContain("Retry and final-review limits are unchanged");
+});
 test("the concise README links to documentation topics that exist", async () => {
   expect(readme.trim().split("\n").length).toBeLessThanOrEqual(120);
   const topicLinks = [...readme.matchAll(/https:\/\/congiuluc\.github\.io\/github-updates-cli\/#([a-z-]+)/g)];

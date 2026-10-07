@@ -18,7 +18,7 @@ test("scheduling templates are opt-in, preserve state and use bounded incrementa
   expect(yaml).toMatch(/Preserve progress[\s\S]*if: always\(\)/);
   const profile = await loadProfile(resolve("examples", "profiles.json"), "team");
   expect(profile.maxCredits).toBe("5");
-  expect(profile.concurrency).toBe("1");
+  expect(profile.concurrency).toBe("3");
   const xml = await readFile(resolve("examples", "windows-weekly-task.xml"), "utf8");
   expect(XMLValidator.validate(xml)).toBe(true);
   expect(xml).toContain("<LogonType>InteractiveToken</LogonType>");
