@@ -30,7 +30,7 @@ function browser(hash = "", mobile = false) {
   const listeners = new Map<string, Handler[]>();
   const windowListeners = new Map<string, (() => void)[]>();
   const scroll = vi.fn();
-  const location = { hash, href: `https://example.github.io/GitHub-Updates-CLI/${hash}` };
+  const location = { hash, href: `https://example.github.io/github-updates-cli/${hash}` };
   const history = [hash];
   let historyIndex = 0;
   const hashChange = (next: string) => {

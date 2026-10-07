@@ -32,7 +32,7 @@
       <div class="topbar-actions">
         <span class="docs-label">Documentation</span>
         <button id="theme-toggle" class="quiet-button" type="button" hidden>Theme</button>
-        <a class="source-link" href="https://github.com/congiuluc/GitHub-Updates-CLI">GitHub <span aria-hidden="true">↗</span></a>
+        <a class="source-link" href="https://github.com/congiuluc/github-updates-cli">GitHub <span aria-hidden="true">↗</span></a>
       </div>
     </div>
   </header>
@@ -55,8 +55,10 @@
           <a href="#usage">Quick start</a>
           <p class="nav-group">Guides</p>
           <a href="#sources">Sources &amp; collection</a>
+          <a href="#profiles-preview">Profiles &amp; preview</a>
           <a href="#presentation">Presentation design</a>
           <a href="#review">AI review &amp; corrections</a>
+          <a href="#review-content">Edit, reuse &amp; regenerate</a>
           <a href="#outputs">Outputs &amp; trace logs</a>
           <a href="#resume">Resume &amp; recovery</a>
           <p class="nav-group">Reference</p>
@@ -66,6 +68,7 @@
           <a href="#troubleshooting">Troubleshooting</a>
           <p class="nav-group">Build &amp; publish</p>
           <a href="#development">Development</a>
+          <a href="#automation">Incremental scheduling</a>
           <a href="#packaging">Packaging</a>
           <a href="#release">CI &amp; releases</a>
           <a href="#github-pages">Publish GitHub Pages</a>
@@ -85,7 +88,7 @@
           <a class="button" href="#cli-reference">Explore the CLI</a>
         </div>
         <div id="features" class="feature-grid">
-          <a class="feature" href="#presentation"><span class="feature-number">01 / PRESENT</span><h2>Made for a briefing</h2><p>Section-aware slides, source links, and English or Italian speaker notes.</p></a>
+          <a class="feature" href="#presentation"><span class="feature-number">01 / PRESENT</span><h2>Made for a briefing</h2><p>Section-aware slides, source links, and presenter notes in your selected locales.</p></a>
           <a class="feature" href="#review"><span class="feature-number">02 / REVIEW</span><h2>Corrections with context</h2><p>Validation errors go back to Copilot. Facts are rewritten, not cut to fit.</p></a>
           <a class="feature" href="#resume"><span class="feature-number">03 / RECOVER</span><h2>Keep the accepted work</h2><p>Retry omitted slides without regenerating the articles already completed.</p></a>
         </div>
@@ -107,8 +110,8 @@
             <tr><th scope="row">macOS</th><td><code>*.pkg</code></td><td><code>*-darwin-*.tar.gz</code></td><td>Intel, Apple Silicon</td></tr>
           </tbody></table>
         </div>
-        <p><a href="https://github.com/congiuluc/GitHub-Updates-CLI/releases/latest">Download a published release <span aria-hidden="true">↗</span></a></p>
-        <div class="callout"><strong>Current source versus installed releases</strong><p>This guide describes the current source. Published packages may not yet contain every option shown here. Run <code>copilot-changelog -h</code> to inspect your installed CLI, or build from a local checkout for newer features. A documentation deployment does not publish or update the CLI.</p></div>
+        <p><a href="https://github.com/congiuluc/github-updates-cli/releases/latest">Download a published release <span aria-hidden="true">↗</span></a></p>
+        <div class="callout"><strong>Current source versus installed releases</strong><p>This guide describes the current source. Published packages may not yet contain every option shown here. Run <code>copilot-changelog --help</code> to inspect your installed CLI, or build from a local checkout for newer features. A documentation deployment does not publish or update the CLI.</p></div>
         <h3>From npm</h3>
         <div class="code-block"><div class="code-heading"><span>After the package is published</span></div><pre><code>npm install --global copilot-changelog-cli
 copilot-changelog --help</code></pre></div>
@@ -130,11 +133,14 @@ npm install --global .</code></pre></div>
         <h2 id="usage-title">A briefing in one command</h2>
         <p>By default, the CLI creates an English PowerPoint with English speaker notes. The newest matching articles in the selected period are processed first.</p>
         <div class="code-block"><div class="code-heading"><span>English presentation</span></div><pre><code>copilot-changelog --from 2026-08-01 --to 2026-08-31</code></pre></div>
-        <p>Short and long options are equivalent and may be mixed. The command above is also <code>copilot-changelog -f 2026-08-01 -t 2026-08-31</code>. Aliases are case-sensitive; see the <a href="#cli-reference">complete option reference</a>.</p>
-        <h3>Italian slides, bilingual notes, and a website</h3>
-        <div class="code-block"><div class="code-heading"><span>Works in PowerShell, Bash, and Zsh</span></div><pre><code>copilot-changelog -f 2026-08-01 -t 2026-08-31 -s it -n en,it -w</code></pre></div>
+        <p>Examples use long options for clarity. Case-sensitive short aliases remain supported; see the <a href="#cli-reference">complete option reference</a>.</p>
+        <h3>Any locale, multilingual notes, and a website</h3>
+        <div class="code-block"><div class="code-heading"><span>Works in PowerShell, Bash, and Zsh</span></div><pre><code>copilot-changelog --from 2026-08-01 --to 2026-08-31 --slides-language fr-CA --speaker-notes-languages fr-CA,ja,ar --website</code></pre></div>
+        <p>Languages accept BCP 47 locale tags recognized by the runtime, not an English/Italian allowlist. Examples include <code>de</code>, <code>pt-BR</code>, <code>zh-Hant</code>, <code>sr-Latn-RS</code> and <code>ar</code>. Tags are canonicalized, so <code>FR-ca</code> becomes <code>fr-CA</code>; duplicate note locales are removed. Use hyphens rather than underscores. Invalid tags fail before source collection.</p>
+        <p>AI localizes article text, slide headings, section/card labels and introductory presenter notes. Dates use the requested locale, right-to-left slide text is supported, and introductory notes are kept in each requested note locale. Translated deck text is saved in the content JSON and cache for offline rendering. Translation quality and font coverage depend on the model and presentation viewer. Source quotations remain verbatim in their original language.</p>
+        <p><code>--no-ai</code> is a deterministic test mode, not a translation engine. It retains source text and uses built-in English/Italian template text or a warned English fallback for other locales. The optional website retains its English interface while marking article content with its selected locale and text direction.</p>
         <h3>Try a smaller selection</h3>
-        <div class="code-block"><div class="code-heading"><span>Five newest matching entries</span></div><pre><code>copilot-changelog -f 2026-08-01 -t 2026-08-31 -l 5 -o output-demo</code></pre></div>
+        <div class="code-block"><div class="code-heading"><span>Five newest matching entries</span></div><pre><code>copilot-changelog --from 2026-08-01 --to 2026-08-31 --limit 5 --output output-demo</code></pre></div>
         <p>Generation commands print the installed version and perform a short release check. Interactive terminals show a Copilot-themed banner; <code>NO_COLOR</code> disables color. Redirected output stays script-friendly, with progress on stderr and generated file paths on stdout.</p>
         <p>The startup release check has a three-second deadline, including the response body. A failed check does not prevent generation.</p>
       </section>
@@ -150,14 +156,36 @@ npm install --global .</code></pre></div>
         </ol>
         <p>Five continuously replenished download slots prepare source pages. News indexes are cached for five minutes and article pages for 24 hours under <code>copilot-changelog-cli/news-v1</code> in the operating system's temporary directory. Fresh cache entries avoid repeat downloads; invalid cache records are refreshed.</p>
         <h3>Add RSS feeds or opt into the blog</h3>
-        <div class="code-block"><div class="code-heading"><span>Add sources to the changelog</span></div><pre><code>copilot-changelog -r https://example.com/news.xml https://example.org/releases.xml
+        <div class="code-block"><div class="code-heading"><span>Add sources to the changelog</span></div><pre><code>copilot-changelog --rss https://example.com/news.xml https://example.org/releases.xml
 # Repeated options and local XML files work too:
-copilot-changelog -r https://example.com/news.xml -r team-news.xml -a</code></pre></div>
-        <p>Replace the example URLs with real RSS endpoints. Quote paths containing spaces, for example <code>-r "team news.xml"</code>. When running through npm, keep the separator before CLI flags: <code>npm run dev -- -r team-news.xml -a</code>.</p>
-        <p>The date range and <code>--limit</code> apply to the combined selection, not separately to each feed. Duplicate URLs ignore fragments, trailing slashes, and common tracking parameters; article-identifying query parameters are retained. Selected RSS entries must include readable text in <code>content:encoded</code> or <code>description</code>. Feed text supplies the article content; linked pages may still be fetched for image discovery during enrichment.</p>
+copilot-changelog --rss https://example.com/news.xml --rss team-news.xml --include-ai-ml</code></pre></div>
+        <p>Replace the example URLs with real RSS endpoints. Quote paths containing spaces, for example <code>--rss "team news.xml"</code>. When running through npm, keep the separator before CLI flags: <code>npm run dev -- --rss team-news.xml --include-ai-ml</code>.</p>
+        <p>The date range and <code>--limit</code> apply to the combined selection, not separately to each feed. Duplicate URLs ignore fragments, trailing slashes, and common tracking parameters; article-identifying query parameters are retained. RSS uses <code>content:encoded</code> or <code>description</code>; Atom supports published/updated dates, alternate links, content and summaries. Remote relative links use the feed URL; local feeds with relative links must provide <code>xml:base</code>.</p>
+        <p>Use <code>-H, --full-articles</code> to fetch the linked page instead of embedded RSS/Atom text. The page must contain readable <code>article</code> or <code>main</code> content; extraction failures are reported, never silently replaced by a short excerpt. Without this flag, feed text supplies the content; pages may still be fetched for image discovery during enrichment.</p>
         <h3>Replace the base source</h3>
         <p><code>--feed</code> replaces the base changelog with an RSS URL or local XML file. With no other source flags, only that feed is collected. You can combine it with <code>--rss</code> and <code>--include-ai-ml</code> to add sources explicitly. On resume, repeat the same source flags so the selected article URLs remain compatible with the checkpoint.</p>
-        <div class="code-block"><div class="code-heading"><span>Deterministic repository fixture</span></div><pre><code>npm run dev -- -f 2026-08-01 -t 2026-08-31 -F test/fixtures/feed.xml -A</code></pre></div>
+        <div class="code-block"><div class="code-heading"><span>Deterministic repository fixture</span></div><pre><code>npm run dev -- --from 2026-08-01 --to 2026-08-31 --feed test/fixtures/feed.xml --no-ai</code></pre></div>
+      </section>
+
+      <section id="profiles-preview" class="doc-section" aria-labelledby="profiles-title">
+        <p class="eyebrow">Guides / Selection</p>
+        <h2 id="profiles-title">Save settings. Preview before spending.</h2>
+        <p><code>-p, --profile</code> loads a named profile from <code>.copilot-changelog.json</code> in the current directory. Use <code>-g, --config</code> for another file. No configuration file is loaded implicitly when neither option is supplied.</p>
+        <div class="code-block"><div class="code-heading"><span>Example .copilot-changelog.json</span></div><pre><code>{
+  "version": 1,
+  "defaults": { "model": "auto", "concurrency": 1, "maxCredits": "5" },
+  "profiles": {
+    "team": { "audience": "developer", "website": true, "rss": ["team-news.xml"] },
+    "executive": { "audience": "executive", "evidence": true }
+  }
+}</code></pre></div>
+        <p>Precedence is explicit CLI options, then the named profile, then configuration defaults, then CLI defaults. Arrays supplied on the CLI replace profile arrays. Local feed, output, cache and state paths in profiles are relative to the configuration file. CLI paths remain relative to the working directory. Unknown settings, malformed values and missing profiles fail explicitly. Never store credentials in profiles.</p>
+        <p>Profiles accept <code>from</code>, <code>to</code>, <code>output</code>, <code>model</code>, <code>limit</code>, <code>feed</code>, <code>rss</code>, <code>includeAiMl</code>, <code>ai</code>, <code>website</code>, <code>concurrency</code>, <code>requestTimeout</code>, <code>slidesLanguage</code>, <code>speakerNotesLanguages</code>, <code>include</code>, <code>exclude</code>, <code>maxCredits</code>, <code>cache</code>, <code>cacheDir</code>, <code>stateDir</code>, <code>fullArticles</code>, <code>audience</code> and <code>evidence</code>. Operational actions such as restart and import stay explicit CLI arguments.</p>
+        <div class="code-block"><div class="code-heading"><span>Preview the selection</span></div><pre><code>copilot-changelog --profile team --include agent editor --exclude retirement --dry-run
+copilot-changelog --config examples/profiles.json --profile team --no-include-ai-ml --no-website --dry-run</code></pre></div>
+        <p><code>--include</code> accepts titles containing any supplied literal substring, ignoring case. <code>--exclude</code> rejects titles containing any supplied substring and takes priority. Filters apply to titles, not downloaded article bodies, before the global limit. Repeated keywords and quoted phrases are supported.</p>
+        <p><code>--dry-run</code> prints JSON with titles, publication dates, source identities and selection reasons: selected, duplicate, include-filter, exclude-filter, limit or already-delivered. It makes no AI calls, downloads no article pages, writes no briefing/checkpoint/incremental files, and does not advance history. Remote feed/index metadata may be read from or written to the normal source cache. Out-of-range entries are filtered during discovery.</p>
+        <p>The default <code>standard</code> audience preserves existing instructions. <code>executive</code> emphasizes decisions and source-backed business impact; <code>developer</code> emphasizes workflows and prerequisites; <code>administrator</code> emphasizes rollout, eligibility, controls and operations. Presets affect AI writing, not the source-based slide section. <code>--no-ai</code> remains a deterministic test mode.</p>
       </section>
 
       <section id="presentation" class="doc-section" aria-labelledby="presentation-title">
@@ -214,6 +242,26 @@ copilot-changelog -r https://example.com/news.xml -r team-news.xml -a</code></pr
         <p>These checks validate presentation content and formatting; they are not an independent factual audit. Review generated slides before sharing them with an audience.</p>
       </section>
 
+      <section id="review-content" class="doc-section" aria-labelledby="review-content-title">
+        <p class="eyebrow">Guides / Editorial workflow</p>
+        <h2 id="review-content-title">Reuse, edit, and regenerate only what needs work</h2>
+        <h3>Accepted-content reuse</h3>
+        <p>Accepted content is cached under <code>output/.content-cache</code> by source content, content version, requested model, AI mode, languages, audience and evidence settings. Date ranges and output formats are not part of the key. Cache hits require no new AI calls and incur no new AI credits in this briefing; source/image preparation may still perform network requests. Change <code>--cache-dir</code> to share a cache across output directories. <code>--no-cache</code> disables reads and writes; <code>--restart</code> bypasses reads to request fresh text. Corrupt entries are reported rather than silently regenerated at your expense.</p>
+        <h3>Review before rendering</h3>
+        <div class="code-block"><div class="code-heading"><span>Create a draft, edit it, then render offline</span></div><pre><code>copilot-changelog --audience executive --speaker-notes-languages en,ja --evidence --max-credits 5 --review-only --export-json review.json
+copilot-changelog --import-json review.json --website --export-json reviewed.json</code></pre></div>
+        <p><code>--export-json</code> saves a versioned content document containing sources, accepted fields, settings, original date range, omitted URLs and reported usage. <code>--review-only</code> writes JSON instead of PowerPoint/HTML and keeps the checkpoint; without an explicit path it writes a date-named <code>.review.json</code>. Edit summaries, notes, details or presenter scripts without removing required keys.</p>
+        <p><code>--import-json</code> validates the document and renders it without fetching sources or calling AI. It uses the saved range and generation settings, so omit source/date overrides and incompatible generation overrides. Import cannot be combined with dry-run or incremental mode. Invalid fields, unsupported source URLs and invalid evidence fail before export. Ordinary import does not replace an existing run checkpoint. Accepted edits can enter the content cache for future reuse.</p>
+        <h3>Targeted regeneration</h3>
+        <div class="code-block"><div class="code-heading"><span>Use an exact article URL from the exported JSON</span></div><pre><code>copilot-changelog --import-json reviewed.json --regenerate https://example.com/article --regenerate-field summary --export-json revised.json
+copilot-changelog --import-json reviewed.json --regenerate https://example.com/article --regenerate-language ja --export-json revised.json
+# Omit the field/language selectors to regenerate the complete selected article:
+copilot-changelog --import-json reviewed.json --regenerate https://example.com/article --export-json revised.json</code></pre></div>
+        <p>Regeneration requires an AI-generated imported document. Only selected article URLs invoke AI. Select <code>summary</code>, <code>notes</code>, or <code>details.KEY</code> with <code>--regenerate-field</code>; select an existing presenter-script language with <code>--regenerate-language</code>. Both can be combined. Unselected articles and fields remain unchanged even if the model tries to rewrite them. Invalid field names, missing URLs and languages absent from the document are reported. A date-named <code>.revised.json</code> is written when no export path is given. Failed revisions keep their previous accepted content in the output and remain pending in the checkpoint.</p>
+        <h3>Evidence for human review</h3>
+        <p><code>--evidence</code> requires at least one supporting quote for the summary, every note, every detail card and every requested presenter script. Quotes must occur verbatim in the source after whitespace normalization and link to the supplied article URL. Evidence is retained in JSON, PowerPoint speaker notes and expandable HTML panels. This checks quotation provenance, <strong>not whether each claim logically follows from the quote</strong>; human factual review is still necessary. Evidence generation requires AI, or previously accepted evidence when importing or reusing content.</p>
+      </section>
+
       <section id="outputs" class="doc-section" aria-labelledby="outputs-title">
         <p class="eyebrow">Guides / Files &amp; diagnostics</p>
         <h2 id="outputs-title">Know what gets written</h2>
@@ -225,25 +273,28 @@ copilot-changelog -r https://example.com/news.xml -r team-news.xml -a</code></pr
         <p>The optional website embeds article images and provides local search. It is a generated digest, separate from this GitHub Pages documentation site. Slide and note languages are independently selectable; the digest's interface labels remain English.</p>
         <h3>Trace logs</h3>
         <p>The JSONL trace is appended on each run with a unique <code>runId</code>. It records source preparation, prompts, raw AI responses, validation, checkpoint activity, skipped articles, and failures. Its path is printed at startup and included in error messages.</p>
-        <div class="code-block"><div class="code-heading"><span>Mirror trace events to stderr</span></div><pre><code>copilot-changelog -f 2026-08-01 -t 2026-08-31 -v</code></pre></div>
+        <div class="code-block"><div class="code-heading"><span>Mirror trace events to stderr</span></div><pre><code>copilot-changelog --from 2026-08-01 --to 2026-08-31 --verbose</code></pre></div>
         <div class="callout warning"><strong>Review logs before sharing</strong><p>Trace files and verbose terminal output include source excerpts, full prompts, and generated text. Without <code>--verbose</code>, the trace file is still written.</p></div>
         <h3>AI credit totals</h3>
         <p>AI runs print reported AI credits at the end, including handled failures. Usage includes primary calls, corrective retries, and the final reviewer, even for omitted articles. Live SDK billing events are persisted as requests run. Resume adds new usage to the checkpoint total and prints the current execution separately; restart starts a new total. Final totals remain in the trace after the checkpoint is removed.</p>
         <p>Credits use the SDK's <code>copilotUsage.totalNanoAiu</code> field divided by one billion, following the <a href="https://github.com/github/copilot-sdk/blob/main/docs/features/usage-and-billing.md">SDK usage guide</a>. Premium-request multipliers are not treated as AI credits. If billing events are missing, a request is interrupted, or an older checkpoint has no usage history, the CLI reports a known lower bound or <strong>unavailable</strong>, not an exact zero. Usage not delivered or saved before forced termination cannot be reconstructed; this is reported runtime usage, not an account billing statement.</p>
+        <h3>Soft spending limits</h3>
+        <p><code>-b, --max-credits</code> applies cumulatively to the briefing, including saved attempts on resume and usage recorded in an imported document. It accepts zero and up to nine decimal places. Before each primary, corrective or reviewer request, the CLI checks reported spend. Already-running concurrent requests can finish and exceed the limit: this is not a prepaid reservation or a hard billing cap.</p>
+        <p>A budget pause preserves accepted content, writes available outputs and the checkpoint, and exits with code <code>2</code>. Resume with a higher limit to continue. If billing reports or earlier usage are missing, budgeted generation pauses rather than guessing that calls were free. A zero budget can still reuse cached content or render imported content without AI. Unbudgeted behavior is unchanged.</p>
       </section>
 
       <section id="resume" class="doc-section" aria-labelledby="resume-title">
         <p class="eyebrow">Guides / Recovery</p>
         <h2 id="resume-title">Continue, don't start over</h2>
         <p>A hidden checkpoint is saved after each successfully enriched article. If a slide still fails review, later articles continue and the CLI writes a partial deck. The rejected article remains pending.</p>
-        <div class="code-block"><div class="code-heading"><span>Retry pending articles with the same configuration</span></div><pre><code>copilot-changelog -f 2026-08-01 -t 2026-08-31 -R</code></pre></div>
+        <div class="code-block"><div class="code-heading"><span>Retry pending articles with the same configuration</span></div><pre><code>copilot-changelog --from 2026-08-01 --to 2026-08-31 --resume</code></pre></div>
         <p>Resume reuses accepted articles, retries missing ones, and rewrites the deck with recovered slides. Add <code>--website</code> again if you also want to update the digest. The checkpoint is removed only after all selected articles complete and every requested output is written.</p>
         <h3>Interactive versus automated runs</h3>
         <p>An interactive terminal asks <code>Previous run found (7/12 entries completed). Resume or restart? [R/s]:</code>. Enter or <code>R</code> resumes; <code>S</code> discards the checkpoint. Scripts and CI must explicitly choose <code>--resume</code> or <code>--restart</code>.</p>
-        <div class="code-block"><div class="code-heading"><span>Discard progress and regenerate all selected content</span></div><pre><code>copilot-changelog -f 2026-08-01 -t 2026-08-31 -S</code></pre></div>
+        <div class="code-block"><div class="code-heading"><span>Discard progress and regenerate all selected content</span></div><pre><code>copilot-changelog --from 2026-08-01 --to 2026-08-31 --restart</code></pre></div>
         <h3>Compatibility and locks</h3>
         <ul>
-          <li>Checkpoints match selected article URLs, model, AI mode, languages, and content format version. An incompatible checkpoint is discarded with a message.</li>
+          <li>Checkpoints match selected article URLs, model, AI mode, languages, audience, evidence requirements, regeneration target and content format version. An incompatible checkpoint is discarded with a message. Changed source content invalidates the affected accepted articles.</li>
           <li>Changing concurrency or request timeout does not invalidate a compatible checkpoint. Layout changes can reuse accepted text; use restart to request new AI text.</li>
           <li>Malformed checkpoints are preserved and reported on resume. Restart discards them without parsing.</li>
           <li>A per-deck <code>.lock</code> blocks competing processes for the same output directory and date range. Restart does not override an active lock.</li>
@@ -254,7 +305,7 @@ copilot-changelog -r https://example.com/news.xml -r team-news.xml -a</code></pr
       <section id="cli-reference" class="doc-section" aria-labelledby="cli-title">
         <p class="eyebrow">Reference / Commands</p>
         <h2 id="cli-title">Every option, in one place</h2>
-        <p>Dates use <code>YYYY-MM-DD</code>; the end date includes the whole UTC day. Numeric options require whole numbers without trailing text. <code>--resume</code> and <code>--restart</code> cannot be combined.</p>
+        <p>Dates use <code>YYYY-MM-DD</code>; the end date includes the whole UTC day. Counts and timeouts require whole numbers; <code>--max-credits</code> permits decimals. <code>--resume</code> and <code>--restart</code> cannot be combined.</p>
         <div class="callout"><strong>Short options are case-sensitive</strong><p><code>-f</code> is the start date; <code>-F</code> is a replacement feed. <code>-r</code> adds RSS; <code>-R</code> resumes; <code>-S</code> restarts. <code>-a</code> adds the AI &amp; ML blog, while <code>-A</code> disables AI enrichment. <code>-v</code> enables verbose logs; <code>-V</code> prints the version. Long names remain supported.</p></div>
         <div class="table-scroll" role="region" aria-label="CLI generation options" tabindex="0">
           <table><caption>Generation options</caption><thead><tr><th scope="col">Option</th><th scope="col">Behavior</th><th scope="col">Default</th></tr></thead><tbody>
@@ -266,8 +317,8 @@ copilot-changelog -r https://example.com/news.xml -r team-news.xml -a</code></pr
             <tr><th scope="row"><code>-F, --feed &lt;url-or-file&gt;</code></th><td>RSS URL or local XML file replacing the base changelog source.</td><td>Copilot changelog</td></tr>
             <tr><th scope="row"><code>-r, --rss &lt;url-or-file...&gt;</code></th><td>Add one or more RSS URLs or local XML files; repeatable and combinable with <code>--feed</code>.</td><td>No additional feeds</td></tr>
             <tr><th scope="row"><code>-a, --include-ai-ml</code></th><td>Also collect GitHub Blog AI &amp; ML articles within the date range.</td><td>Disabled</td></tr>
-            <tr><th scope="row"><code>-s, --slides-language &lt;language&gt;</code></th><td>Slide content language: <code>en</code> or <code>it</code>.</td><td><code>en</code></td></tr>
-            <tr><th scope="row"><code>-n, --speaker-notes-languages &lt;languages&gt;</code></th><td>Comma-separated script languages: <code>en</code>, <code>it</code>, or <code>en,it</code>.</td><td><code>en</code></td></tr>
+            <tr><th scope="row"><code>-s, --slides-language &lt;locale&gt;</code></th><td>BCP 47 slide locale, such as <code>fr-CA</code>, <code>zh-Hant</code> or <code>ar</code>.</td><td><code>en</code></td></tr>
+            <tr><th scope="row"><code>-n, --speaker-notes-languages &lt;locales&gt;</code></th><td>Comma-separated BCP 47 note locales; canonicalized and deduplicated.</td><td><code>en</code></td></tr>
             <tr><th scope="row"><code>-w, --website</code></th><td>Also generate the self-contained HTML digest.</td><td>Disabled</td></tr>
             <tr><th scope="row"><code>-R, --resume</code></th><td>Reuse compatible completed content without prompting.</td><td>Disabled</td></tr>
             <tr><th scope="row"><code>-S, --restart</code></th><td>Discard saved progress without prompting.</td><td>Disabled</td></tr>
@@ -279,10 +330,42 @@ copilot-changelog -r https://example.com/news.xml -r team-news.xml -a</code></pr
             <tr><th scope="row"><code>-h, --help</code></th><td>Print command help and exit.</td><td>—</td></tr>
           </tbody></table>
         </div>
+        <details class="faq">
+          <summary>Profiles, selection, budgets, review and automation options</summary>
+          <div class="table-scroll" role="region" aria-label="Extended workflow options" tabindex="0">
+            <table><caption>Extended workflow options</caption><thead><tr><th scope="col">Option</th><th scope="col">Behavior</th><th scope="col">Default</th></tr></thead><tbody>
+              <tr><th scope="row"><code>-g, --config &lt;file&gt;</code></th><td>JSON configuration for defaults and named profiles.</td><td><code>.copilot-changelog.json</code> when a profile is selected</td></tr>
+              <tr><th scope="row"><code>-p, --profile &lt;name&gt;</code></th><td>Named profile; explicit CLI values override it.</td><td>None</td></tr>
+              <tr><th scope="row"><code>-d, --dry-run</code></th><td>Print selection JSON without AI, article downloads or briefing-state writes.</td><td>Disabled</td></tr>
+              <tr><th scope="row"><code>-i, --include &lt;keyword...&gt;</code></th><td>Include titles matching any case-insensitive literal keyword.</td><td>All titles</td></tr>
+              <tr><th scope="row"><code>-x, --exclude &lt;keyword...&gt;</code></th><td>Exclude matching titles; exclusions take priority.</td><td>None</td></tr>
+              <tr><th scope="row"><code>-b, --max-credits &lt;credits&gt;</code></th><td>Cumulative soft AI budget; zero is allowed. Budget pause exits with code 2.</td><td>No cap</td></tr>
+              <tr><th scope="row"><code>-u, --cache-dir &lt;directory&gt;</code></th><td>Store reusable accepted content by source/settings fingerprint.</td><td><code>output/.content-cache</code></td></tr>
+              <tr><th scope="row"><code>-B, --no-cache</code></th><td>Disable accepted-content cache reads and writes.</td><td>Cache enabled</td></tr>
+              <tr><th scope="row"><code>-K, --cache</code></th><td>Enable cache reuse, overriding a profile.</td><td>Enabled</td></tr>
+              <tr><th scope="row"><code>-e, --export-json &lt;file&gt;</code></th><td>Write editable briefing sources, content, settings and usage.</td><td>None</td></tr>
+              <tr><th scope="row"><code>-j, --import-json &lt;file&gt;</code></th><td>Validate and render saved content without source downloads or AI, unless regenerating selected URLs.</td><td>None</td></tr>
+              <tr><th scope="row"><code>-Q, --review-only</code></th><td>Postpone PowerPoint/HTML; export JSON and retain the checkpoint.</td><td>Disabled</td></tr>
+              <tr><th scope="row"><code>-H, --full-articles</code></th><td>Fetch full RSS/Atom article pages; extraction must succeed.</td><td>Embedded feed text</td></tr>
+              <tr><th scope="row"><code>-Z, --no-full-articles</code></th><td>Use embedded feed text, overriding a profile.</td><td>Embedded feed text</td></tr>
+              <tr><th scope="row"><code>-I, --since-last-run</code></th><td>Incremental selection with durable delivered-URL and pending-run state.</td><td>Disabled</td></tr>
+              <tr><th scope="row"><code>-z, --state-dir &lt;directory&gt;</code></th><td>Store incremental history independently of output date ranges.</td><td><code>output/.briefing-state</code></td></tr>
+              <tr><th scope="row"><code>-q, --audience &lt;preset&gt;</code></th><td><code>standard</code>, <code>executive</code>, <code>developer</code> or <code>administrator</code>.</td><td><code>standard</code></td></tr>
+              <tr><th scope="row"><code>-E, --evidence</code></th><td>Require verifiable source quotations for generated fields.</td><td>Disabled</td></tr>
+              <tr><th scope="row"><code>-O, --no-evidence</code></th><td>Disable evidence requirements, overriding a profile.</td><td>Disabled</td></tr>
+              <tr><th scope="row"><code>-G, --regenerate &lt;url...&gt;</code></th><td>Regenerate exact article URLs from an imported AI content document.</td><td>None</td></tr>
+              <tr><th scope="row"><code>-D, --regenerate-field &lt;field...&gt;</code></th><td>Limit selected revisions to summary, notes or details.KEY.</td><td>Whole selected article</td></tr>
+              <tr><th scope="row"><code>-N, --regenerate-language &lt;language...&gt;</code></th><td>Revise only existing speaker-note languages for selected URLs.</td><td>All requested fields</td></tr>
+              <tr><th scope="row"><code>-M, --no-include-ai-ml</code></th><td>Disable the optional blog source, overriding a profile.</td><td>Blog disabled</td></tr>
+              <tr><th scope="row"><code>-W, --no-website</code></th><td>Disable HTML output, overriding a profile.</td><td>HTML disabled</td></tr>
+              <tr><th scope="row"><code>-U, --ai</code></th><td>Enable AI enrichment, overriding a profile.</td><td>Enabled</td></tr>
+            </tbody></table>
+          </div>
+        </details>
         <div class="table-scroll" role="region" aria-label="CLI management commands" tabindex="0">
           <table><caption>Management commands</caption><thead><tr><th scope="col">Command</th><th scope="col">Behavior</th></tr></thead><tbody>
             <tr><th scope="row"><code>copilot-changelog version</code></th><td>Print the installed CLI version.</td></tr>
-            <tr><th scope="row"><code>copilot-changelog update -k</code></th><td><code>-k, --check</code>: check GitHub Releases without installing.</td></tr>
+            <tr><th scope="row"><code>copilot-changelog update --check</code></th><td><code>-k, --check</code>: check GitHub Releases without installing.</td></tr>
             <tr><th scope="row"><code>copilot-changelog update</code></th><td>Verify and install the latest compatible release.</td></tr>
             <tr><th scope="row"><code>copilot-changelog update --help</code></th><td>Show update-command help.</td></tr>
           </tbody></table>
@@ -295,7 +378,7 @@ copilot-changelog -r https://example.com/news.xml -r team-news.xml -a</code></pr
         <p>Sequential enrichment is the default: one shared client, one fresh session per article. Use <code>--concurrency 2</code> through <code>8</code> only when your Copilot environment supports the load. Corrective prompts stay associated with their source; results retain changelog order within each section.</p>
         <p>Interactive terminals show a progress bar and one status row per concurrent worker, updated in place with the article title, attempt, validation, and reviewer status. The bar counts processed articles, including omissions listed separately, and starts from accepted articles on resume. Source preparation also updates in place. Warnings remain visible. Redirected output, <code>TERM=dumb</code>, and <code>--verbose</code> retain plain scrolling logs. Increase terminal height to see every worker when space is limited.</p>
         <p>The 180-second deadline applies separately to each response, runtime startup, model discovery, and primary or reviewer session creation. Timeouts stop new articles and retries. Active peers may complete and be checkpointed before runtime shutdown.</p>
-        <div class="code-block"><div class="code-heading"><span>Resume with less contention</span></div><pre><code>copilot-changelog -f 2026-08-01 -t 2026-08-31 -R -c 1 -T 180</code></pre></div>
+        <div class="code-block"><div class="code-heading"><span>Resume with less contention</span></div><pre><code>copilot-changelog --from 2026-08-01 --to 2026-08-31 --resume --concurrency 1 --request-timeout 180</code></pre></div>
         <p>Increasing the timeout permits slower responses; it does not speed up inference. Abort/disconnect and shutdown have bounded cleanup waits. Both sessions are cleaned up even if one cleanup fails, and cleanup diagnostics are reported alongside the original error. A forced SDK stop is attempted if graceful shutdown fails.</p>
         <p>Source downloads remain parallel. Help and version commands avoid loading generation dependencies, and the SDK is imported only when AI is needed. Sessions have no tools available because the source is supplied. PowerPoint theme changes happen in memory before the final write.</p>
       </section>
@@ -303,8 +386,8 @@ copilot-changelog -r https://example.com/news.xml -r team-news.xml -a</code></pr
       <section id="updates" class="doc-section" aria-labelledby="updates-title">
         <p class="eyebrow">Reference / Maintenance</p>
         <h2 id="updates-title">Keep the CLI current</h2>
-        <div class="code-block"><div class="code-heading"><span>Check, then update</span></div><pre><code>copilot-changelog -V
-copilot-changelog update -k
+        <div class="code-block"><div class="code-heading"><span>Check, then update</span></div><pre><code>copilot-changelog --version
+copilot-changelog update --check
 copilot-changelog update</code></pre></div>
         <p>Updates require a published GitHub release. Release lookup allows 30 seconds; each asset download allows five minutes. Downloaded release assets are verified against <code>SHA256SUMS</code>.</p>
         <ul>
@@ -325,7 +408,7 @@ copilot-changelog update</code></pre></div>
         <details class="faq"><summary>Source preparation failed</summary><p>Every selected article must be readable before enrichment starts. Check the URL, feed content, and internet connection. Downloaded articles remain cached. If the diagnostic identifies an unreadable cache directory, repair its permissions or remove that specific cache after reviewing the error.</p></details>
         <details class="faq"><summary>A run lock or damaged checkpoint remains</summary><p>For a lock, confirm the original process has stopped before removing only the reported lock file. A damaged checkpoint is preserved on resume; <code>--restart</code> discards it. Neither option bypasses an active run lock.</p></details>
         <details class="faq"><summary>The CLI is not found on Windows</summary><p>Open a new terminal after installing so the updated PATH is loaded. For a portable package, invoke the launcher from its extracted directory or add that directory to PATH.</p></details>
-        <details class="faq"><summary>An option is unknown or does something unexpected</summary><p>Check <code>copilot-changelog -V</code> and <code>copilot-changelog -h</code>: an installed release may be older than this source guide. Short aliases are case-sensitive: <code>-r</code> adds feeds, <code>-R</code> resumes, and <code>-S</code> restarts. Use the long form to make scripts easier to read, and keep <code>--</code> between <code>npm run dev</code> and CLI arguments.</p></details>
+        <details class="faq"><summary>An option is unknown or does something unexpected</summary><p>Check <code>copilot-changelog --version</code> and <code>copilot-changelog --help</code>: an installed release may be older than this source guide. Short aliases remain case-sensitive and are listed in the reference table. Use long options in scripts, and keep <code>--</code> between <code>npm run dev</code> and CLI arguments.</p></details>
         <details class="faq"><summary>Badges, documentation, or download links return 404</summary><p>The repository must be accessible and pushed, workflows must have run, and downloads require a release. Enable GitHub Pages with GitHub Actions as its source. See <a href="#github-pages">the publishing checklist</a>; local files alone do not create a public site.</p></details>
         <details class="faq"><summary>Trace or output writing failed</summary><p>Check directory permissions, available disk space, and whether the presentation is open in another application. Fix the filesystem problem and resume. Do not share the trace without reviewing its prompts and source content.</p></details>
       </section>
@@ -345,6 +428,24 @@ docs/                 This static GitHub Pages site
 .github/workflows/    CI, documentation, and releases
 test/fixtures/        Deterministic source inputs</code></pre></div>
         <p>Keep generated output, dependencies, and packaging artifacts out of commits. The documentation is plain HTML, CSS, and JavaScript: no framework install or site build is required. Local search stays in your browser and sends no queries to a service.</p>
+        <h3>Maintaining the code</h3>
+        <p>The <a href="https://github.com/congiuluc/github-updates-cli/blob/main/CONTRIBUTING.md">maintainer guide</a> maps modules and explains persistence, credit accounting, concurrency, localization and regression tests. The command shell declares options and starts the workflow lazily. Pure option parsing and prompt construction are separate from source downloads, SDK calls and the run pipeline.</p>
+        <p>When changing behavior, test the smallest affected module group first, then type-check and build. Changes spanning checkpoints, generation and exports require the full regression suite. Mock network and SDK calls; tests must not need credentials or consume AI credits. Preserve source ordering, drain concurrent work before cleanup, and advance incremental history only after all requested exports succeed.</p>
+      </section>
+
+      <section id="automation" class="doc-section" aria-labelledby="automation-title">
+        <p class="eyebrow">Build &amp; publish / Automation</p>
+        <h2 id="automation-title">Incremental briefings on your schedule</h2>
+        <div class="code-block"><div class="code-heading"><span>Run only pending or newly discovered articles</span></div><pre><code>copilot-changelog --config examples/profiles.json --profile team --since-last-run --resume</code></pre></div>
+        <p><code>--since-last-run</code> keeps durable history per profile/source/filter/generation selection under <code>output/.briefing-state</code>. The first run uses the requested dates; later runs continue from saved history, not a newly supplied start date. A pending failed run retains its exact time window. Use <code>--resume</code> for unattended checkpoint recovery.</p>
+        <p>History advances only after every selected article is accepted and all requested outputs are written. Budget pauses, omitted content, source failures and review-only drafts do not advance it. Already-delivered URLs are excluded before the global limit; articles left behind by <code>--limit</code> remain eligible on later runs. The final day overlaps to avoid losing entries from date-only changelog indexes. This is not a monitor for arbitrarily backdated articles or revisions to already-delivered URLs.</p>
+        <p>Source/filter or generation-setting changes create separate histories. Changing a limit, timeout or concurrency does not. Use <code>--state-dir</code> to choose durable storage or start a separate history. Incremental and per-deck locks prevent competing runs. Do not delete a lock until you have confirmed its owning process is no longer running.</p>
+        <h3>GitHub Actions template</h3>
+        <p>The repository includes <a href="https://github.com/congiuluc/github-updates-cli/blob/main/examples/scheduled-briefing.yml">examples/scheduled-briefing.yml</a> and <a href="https://github.com/congiuluc/github-updates-cli/blob/main/examples/profiles.json">sample profiles</a>. The YAML is outside the workflow directory, so it is not active. Review the profile and its five-credit soft budget, add a repository secret named <code>COPILOT_TOKEN</code> with Copilot Requests permission, then copy the template into <code>.github/workflows/</code> only when you intend to enable it.</p>
+        <p>The template runs weekly at 07:00 UTC on Monday or manually, prevents overlapping runs, restores accepted content and incremental state, and saves checkpoints even after budget pauses. Its cache is best-effort: GitHub may evict it. For guaranteed retention use durable storage on a persistent runner, or a Windows task with a backed-up state directory. Missing history starts a fresh selection and can incur repeat AI cost.</p>
+        <h3>Windows Task Scheduler template</h3>
+        <p>Review <a href="https://github.com/congiuluc/github-updates-cli/blob/main/examples/windows-weekly-task.xml">examples/windows-weekly-task.xml</a>, replace the Node/repository paths and start time, then import it through Task Scheduler yourself. It uses the signed-in user's credentials, least privilege and <code>IgnoreNew</code> to avoid overlapping instances. Build the CLI and authenticate Copilot as that user first. No command in this project registers the task automatically.</p>
+        <div class="callout warning"><strong>Persistent state contains source content</strong><p>Editable JSON, accepted-content caches and checkpoints can contain article text, generated content and images. Protect them like your source material. The example workflow uploads generated outputs, not trace logs; review repository access and artifact retention before enabling it. Do not store credentials in profiles or task XML.</p></div>
       </section>
 
       <section id="packaging" class="doc-section" aria-labelledby="packaging-title">
@@ -373,15 +474,18 @@ npm run build:macos -- x64</code></pre></div>
         <p class="eyebrow">Build &amp; publish / Automation</p>
         <h2 id="release-title">From a tag to a release</h2>
         <ul>
-          <li><a href="https://github.com/congiuluc/GitHub-Updates-CLI/blob/main/.github/workflows/ci.yml"><code>ci.yml</code></a> runs type-checks and tests on Windows, Linux, and macOS, including the minimum supported Node version.</li>
-          <li><a href="https://github.com/congiuluc/GitHub-Updates-CLI/blob/main/.github/workflows/pages.yml"><code>pages.yml</code></a> publishes this documentation independently of application releases.</li>
-          <li><a href="https://github.com/congiuluc/GitHub-Updates-CLI/blob/main/.github/workflows/release.yml"><code>release.yml</code></a> validates the version, builds native platform packages, generates <code>SHA256SUMS</code>, and publishes only after validation succeeds.</li>
+          <li><a href="https://github.com/congiuluc/github-updates-cli/blob/main/.github/workflows/ci.yml"><code>ci.yml</code></a> runs type-checks and tests on Windows, Linux, and macOS, including the minimum supported Node version.</li>
+          <li><a href="https://github.com/congiuluc/github-updates-cli/blob/main/.github/workflows/pages.yml"><code>pages.yml</code></a> publishes this documentation independently of application releases.</li>
+          <li><a href="https://github.com/congiuluc/github-updates-cli/blob/main/.github/workflows/release.yml"><code>release.yml</code></a> validates the version, builds native platform packages, generates <code>SHA256SUMS</code>, and publishes only after validation succeeds.</li>
         </ul>
-        <p>Update the version in the manifest and lockfile, commit, then push a matching version tag. For example, if the package version is <code>1.0.0</code>:</p>
-        <div class="code-block"><div class="code-heading"><span>Publish a matching tag</span></div><pre><code>git tag v1.0.0
-git push origin v1.0.0</code></pre></div>
-        <p>The tag must equal <code>v</code> followed by the package version. Workflow dispatch can build packages without publishing a tag release. Publishing to npm is a separate operation; the release workflow does not run <code>npm publish</code>.</p>
-        <p>If a pull-request workflow has no jobs and reports that approval expired, approve a newly requested run in GitHub Actions. This is separate from a test or build failure. The tag/version check is intentional; fix the version mismatch rather than removing the check.</p>
+        <p>Commit the source you want to release, then tag that commit. The release tag supplies the version used in packaged manifests and lockfiles; the checked-in development version does not have to match. Tags must use <code>vX.Y.Z</code>, optionally with a SemVer prerelease suffix such as <code>v0.0.3-rc.1</code>. Build metadata suffixes are not accepted.</p>
+        <div class="code-block"><div class="code-heading"><span>Publish a new source revision</span></div><pre><code>git tag v0.0.3
+git push origin v0.0.3</code></pre></div>
+        <p>The workflow resolves the tag to an exact commit, validates the version, then stamps <code>package.json</code> and <code>package-lock.json</code> in each isolated build/validation workspace before installing dependencies. It does not change the source tag or commit. All artifacts therefore contain the tagged source and the tag-derived version. Prerelease tags publish prereleases.</p>
+        <div class="code-block"><div class="code-heading"><span>Recover an existing failed tag using the updated workflow</span></div><pre><code>gh workflow run release.yml --ref main --field tag=v0.0.2</code></pre></div>
+        <p>First push the updated workflow to <code>main</code>. The optional <code>tag</code> dispatch input builds and publishes that existing tag; it does not move it. For <code>v0.0.2</code>, this means the original tagged source is packaged as version <code>0.0.2</code>, not newer untagged source. Rerunning an old failed run still uses its old workflow. To ship newer source, create a new tag after committing it. An already-published GitHub release is not overwritten.</p>
+        <p>Dispatch without a tag builds the selected branch using its manifest version without publishing. Publishing to npm is a separate operation; the release workflow does not run <code>npm publish</code>. Workflows use Node 24-compatible action releases and pin Linux x64 jobs to Ubuntu 24.04 instead of following <code>ubuntu-latest</code> across operating-system migrations.</p>
+        <p>If a pull-request workflow has no jobs and reports that approval expired, approve a newly requested run in GitHub Actions. This is separate from a test or build failure.</p>
       </section>
 
       <section id="github-pages" class="doc-section" aria-labelledby="pages-title">
@@ -394,7 +498,7 @@ git push origin v1.0.0</code></pre></div>
           <li><strong>Deploy.</strong> Push a change under <code>docs/</code>, or open <strong>Actions → Deploy documentation → Run workflow</strong> on <code>main</code>.</li>
           <li><strong>Verify.</strong> Wait for the deployment to succeed, then open the URL in the <code>github-pages</code> environment. No release tag is needed.</li>
         </ol>
-        <div class="callout"><strong>Published site address</strong><p><a href="https://congiuluc.github.io/GitHub-Updates-CLI/">https://congiuluc.github.io/GitHub-Updates-CLI/</a></p><p>Changes under <code>docs/</code> are published after they are pushed to <code>main</code> and the Pages workflow succeeds. Local edits alone do not update the live site. For a fork, enable Pages and complete its first deployment before expecting its own URL to work.</p></div>
+        <div class="callout"><strong>Published site address</strong><p><a href="https://congiuluc.github.io/github-updates-cli/">https://congiuluc.github.io/github-updates-cli/</a></p><p>Changes under <code>docs/</code> are published after they are pushed to <code>main</code> and the Pages workflow succeeds. Local edits alone do not update the live site. For a fork, enable Pages and complete its first deployment before expecting its own URL to work.</p></div>
         <h3>Using a different repository name or owner</h3>
         <p>Update repository, homepage, and bug-report metadata in <code>package.json</code>; the repository constant in <code>src/updater.ts</code>; and repository/site URLs in the README and documentation. This site's stylesheet, script, images, and section links are relative, so it works beneath a project Pages subpath.</p>
         <p>This website is documentation for the CLI. It is not the optional article digest created by <code>--website</code>, and deploying it does not publish a CLI release.</p>

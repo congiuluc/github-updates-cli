@@ -1,41 +1,44 @@
 import type { CopilotClient } from "@github/copilot-sdk";
 import { load } from "cheerio";
-import { createUsageTracker, type AiUsage, type UsageSession } from "./usage.js";
+import { buildEnrichmentPrompt } from "./enrichment-prompt.js";
+import {
+  evidenceIssues, mergeRegeneratedContent, parseEvidence,
+  type Audience, type RegenerationTarget,
+} from "./generation.js";
+import {
+  builtinLanguage, localizationIssues, parseLocalization,
+} from "./locales.js";
+import { createUsageTracker, CreditLimitError, emptyAiUsage, type AiUsage, type UsageSession } from "./usage.js";
 import {
   sections,
   sectionDetailKeys,
   explanatoryDetailKeys,
   type ChangelogPost,
   type EnrichedPost,
+  type GeneratedContent,
   type Section,
   type SlideDetailKey,
   type SupportedLanguage,
 } from "./types.js";
 export { sectionDetailKeys } from "./types.js";
+export type { GeneratedContent } from "./types.js";
 import {
   NEWS_ARTICLE_CACHE_MAX_AGE_MS,
   readThroughNewsCache,
 } from "./news-cache.js";
 
-export interface GeneratedContent {
-  section: Section;
-  summary: string;
-  notes: string[];
-  details: Partial<Record<SlideDetailKey, string>>;
-  speakerNotes: Partial<Record<SupportedLanguage, string>>;
-}
-
 export interface EnrichmentTraceEvent {
   event:
-    | "article_processing_started"
-    | "article_processing_completed"
-    | "article_processing_failed"
-    | "article_review_skipped"
-    | "copilot_attempt_started"
-    | "copilot_response_received"
-    | "copilot_request_failed"
-    | "slide_validation_completed"
-    | "image_download_failed";
+  | "article_processing_started"
+  | "article_processing_completed"
+  | "article_processing_failed"
+  | "article_review_skipped"
+  | "article_processing_paused"
+  | "copilot_attempt_started"
+  | "copilot_response_received"
+  | "copilot_request_failed"
+  | "slide_validation_completed"
+  | "image_download_failed";
   articleTitle: string;
   worker?: number;
   attempt?: number;
@@ -79,7 +82,35 @@ class CopilotRequestTimeoutError extends Error {
   }
 }
 
-export class SlideReviewFailedError extends Error {}
+export class SlideReviewFailedError extends Error { }
+
+export interface EnrichmentOptions {
+  model: string;
+  useAi: boolean;
+  slidesLanguage: SupportedLanguage;
+  speakerNotesLanguages: SupportedLanguage[];
+  concurrency?: number;
+  requestTimeoutMs?: number;
+  progressOffset?: number;
+  progressTotal?: number;
+  progressForPost?: (post: ChangelogPost) => number;
+  /** Persist accepted work before the worker reports completion. */
+  onPostEnriched?: (post: EnrichedPost) => Promise<void>;
+  trace?: (event: EnrichmentTraceEvent) => Promise<void>;
+  traceLogPath?: string;
+  onProgress?: (event: EnrichmentTraceEvent) => void;
+  onMessage?: (message: string) => void;
+  /** Receives whole-invocation snapshots, not per-request usage deltas. */
+  onUsage?: (usage: AiUsage) => Promise<void>;
+  maximumNanoAiu?: number;
+  previousUsage?: AiUsage;
+  onBudgetPaused?: (error: CreditLimitError) => Promise<void>;
+  audience?: Audience;
+  evidence?: boolean;
+  acceptedContent?: ReadonlyMap<string, GeneratedContent>;
+  regeneration?: ReadonlyMap<string, RegenerationTarget>;
+  clientFactory?: () => EnrichmentCopilotClient;
+}
 
 function isCopilotTimeout(error: unknown): boolean {
   return error instanceof CopilotRequestTimeoutError ||
@@ -122,8 +153,7 @@ async function resolveModelId(
     .map((model) => `${model.name} (${model.id})`)
     .sort((left, right) => left.localeCompare(right));
   throw new Error(
-    `Copilot model "${requestedModel}" is not available. Available models: ${
-      availableModels.length > 0 ? availableModels.join(", ") : "none"
+    `Copilot model "${requestedModel}" is not available. Available models: ${availableModels.length > 0 ? availableModels.join(", ") : "none"
     }.`,
   );
 }
@@ -136,7 +166,7 @@ const titleDetailKeys = new Set<SlideDetailKey>([
 ]);
 
 const benefitOrientedActionPattern =
-  /^(?:(?:access|add|allow|accelerate|apply|automate|boost|bring|build|catch|choose|clarify|connect|control|coordinate|create|customize|cut|debug|deliver|detect|discover|edit|enable|enforce|enhance|expand|find|generate|govern|help|improve|introduce|let|maintain|manage|modernize|monitor|navigate|optimize|organize|pin|prepare|protect|provide|publish|reduce|review|run|select|share|simplify|speed|standardize|streamline|strengthen|support|surface|track|tune|unlock|update|use|validate)(?:s|es)?|(?:accedi|accelera|aggiorna|aggiunge|abilita|applica|automatizza|chiarisce|collega|condividi|consente|controlla|coordina|crea|fornisce|genera|gestisce|governa|individua|migliora|modernizza|monitora|naviga|organizza|ottimizza|permette|potenzia|prepara|pubblica|regola|riduce|rende|semplifica|standardizza|supporta|valida|velocizza))\b/i;
+  /^(?:(?:access|add|allow|accelerate|apply|automate|boost|bring|build|catch|choose|clarify|connect|control|coordinate|create|customi[sz]e|cut|debug|deliver|detect|discover|edit|enable|enforce|enhance|expand|find|generate|govern|help|improve|introduce|let|maintain|manage|moderni[sz]e|monitor|navigate|optimi[sz]e|organi[sz]e|pin|prepare|protect|provide|publish|reduce|review|run|select|share|simplify|speed|standardi[sz]e|streamline|strengthen|support|surface|track|tune|unlock|update|use|validate)(?:s|es)?|(?:accedi|accelera|aggiorna|aggiunge|abilita|applica|automatizza|chiarisce|collega|condividi|consente|controlla|coordina|crea|fornisce|genera|gestisce|governa|individua|migliora|modernizza|monitora|naviga|organizza|ottimizza|permette|potenzia|prepara|pubblica|regola|riduce|rende|semplifica|standardizza|supporta|valida|velocizza))\b/i;
 
 function beginsWithBenefitOrientedAction(value: string): boolean {
   return benefitOrientedActionPattern.test(value.trim());
@@ -201,7 +231,10 @@ function simplifyDeterministicContent(content: GeneratedContent): GeneratedConte
   };
 }
 
-function wordCount(value: string): number {
+function wordCount(value: string, locale?: SupportedLanguage): number {
+  if (locale && !builtinLanguage(locale)) {
+    return [...new Intl.Segmenter(locale, { granularity: "word" }).segment(value)].filter((part) => part.isWordLike).length;
+  }
   return value.trim().split(/\s+/).filter(Boolean).length;
 }
 
@@ -294,28 +327,31 @@ export function classifySection(post: ChangelogPost): Section {
   return "Announcements";
 }
 
+/** Check slide wording and layout budgets; presenter-script length remains a prompt target. */
 export function slideContentIssues(
   content: GeneratedContent,
   articleTitle?: string,
   expectedSection?: Section,
-  speakerNotesLanguages: SupportedLanguage[] = [],
+  _speakerNotesLanguages: SupportedLanguage[] = [],
+  slidesLanguage: SupportedLanguage = "en",
 ): string[] {
   const issues: string[] = [];
+  const lexicalRules = Boolean(builtinLanguage(slidesLanguage));
   if (expectedSection && content.section !== expectedSection) {
     issues.push(`section must be ${expectedSection}`);
   }
-  if (wordCount(content.summary) > 32 || content.summary.length > 220) {
+  if (wordCount(content.summary, slidesLanguage) > 32 || content.summary.length > 220) {
     issues.push("summary must be at most 32 words and 220 characters");
   }
   if (
     /[\r\n]/.test(content.summary) ||
     /\.{3}|…/.test(content.summary) ||
-    !/[.!?]$/.test(content.summary.trim()) ||
-    endsWithDanglingWord(content.summary)
+    !/\p{Sentence_Terminal}[\p{Close_Punctuation}\p{Final_Punctuation}"']*$/u.test(content.summary.trim()) ||
+    (lexicalRules && endsWithDanglingWord(content.summary))
   ) {
     issues.push("summary must be one complete sentence without line breaks or ellipses");
   }
-  if (/^(?:this|the) (?:announcement|change|release|update)\b/i.test(content.summary.trim())) {
+  if (lexicalRules && /^(?:this|the) (?:announcement|change|release|update)\b/i.test(content.summary.trim())) {
     issues.push("summary must lead with the product or capability, not a generic update reference");
   }
   if (
@@ -328,10 +364,10 @@ export function slideContentIssues(
     issues.push("notes must contain 2-4 bullets");
   }
   content.notes.forEach((note, index) => {
-    if (wordCount(note) > 16 || note.length > 110) {
+    if (wordCount(note, slidesLanguage) > 16 || note.length > 110) {
       issues.push(`note ${index + 1} must be at most 16 words and 110 characters`);
     }
-    if (/[\r\n]|\.{3}|…/.test(note) || endsWithDanglingWord(note)) {
+    if (/[\r\n]|\.{3}|…/.test(note) || (lexicalRules && endsWithDanglingWord(note))) {
       issues.push(`note ${index + 1} must be a complete standalone phrase without ellipses`);
     }
   });
@@ -343,36 +379,36 @@ export function slideContentIssues(
     const explanatory = explanatoryDetailKeys.has(key);
     const maximumWords = expanded ? 44 : explanatory ? 36 : titleDetailKeys.has(key) ? 18 : 26;
     const maximumCharacters = expanded ? 300 : explanatory ? 250 : titleDetailKeys.has(key) ? 130 : 170;
-    if (wordCount(value) > maximumWords || value.length > maximumCharacters) {
+    if (wordCount(value, slidesLanguage) > maximumWords || value.length > maximumCharacters) {
       issues.push(`${key} must be at most ${maximumWords} words and ${maximumCharacters} characters`);
     }
     if (
       /[\r\n]|\.{3}|…/.test(value) ||
-      endsWithDanglingWord(value) ||
-      /(?:see|read|check)\s+(?:the\s+)?(?:source|article|documentation)/i.test(value)
+      (lexicalRules && endsWithDanglingWord(value)) ||
+      (lexicalRules && /(?:see|read|check)\s+(?:the\s+)?(?:source|article|documentation)/i.test(value))
     ) {
       issues.push(`${key} must be a complete standalone phrase without filler or ellipses`);
     }
     // Commas can separate model names, dates, or qualifiers within one point.
-    if (value.split(";").filter((point) => point.trim()).length > 3) {
+    if (value.split(/[;；؛]/u).filter((point) => point.trim()).length > 3) {
       issues.push(`${key} must prioritize 2-3 semicolon-separated points instead of an exhaustive list`);
     }
     if (
-      key === "availability" &&
+      lexicalRules && key === "availability" &&
       /\b(?:announced|published|posted)\s+(?:on\s+)?(?:\d{1,4}(?:[-/]\d{1,2})?|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/i.test(value)
     ) {
       issues.push("availability must describe product status, eligibility, plans, or supported surfaces, not the article date");
     }
     if (
-      key === "keyCapabilities" &&
+      lexicalRules && key === "keyCapabilities" &&
       !beginsWithBenefitOrientedAction(value)
     ) {
       issues.push("keyCapabilities must begin with a benefit-oriented action");
     }
-    if (key === "announcement" && wordCount(value) < 6) {
+    if (lexicalRules && key === "announcement" && wordCount(value) < 6) {
       issues.push("announcement must state the specific change, not only name its topic");
     }
-    if (key === "impact" && wordCount(value) < 8) {
+    if (lexicalRules && key === "impact" && wordCount(value) < 8) {
       issues.push("impact must cover the main consequence and required action");
     }
     if (
@@ -386,18 +422,11 @@ export function slideContentIssues(
       issues.push(`${key} must add a distinct fact instead of repeating the summary`);
     }
     if (
-      key === "useGuidance" &&
+      lexicalRules && key === "useGuidance" &&
       !hasUseAndAvoidGuidance(value)
     ) {
       issues.push("useGuidance must explicitly state both when to use and when to avoid the model");
     }
-  }
-  for (const language of speakerNotesLanguages) {
-    const notes = content.speakerNotes[language] ?? "";
-    const count = wordCount(notes);
-    /*if (count < 80 || count > 140) {
-      issues.push(`speakerNotes.${language} must contain 80-140 words`);
-    }*/
   }
   return issues;
 }
@@ -449,6 +478,8 @@ function parseGeneratedContent(
     speakerNotes: Object.fromEntries(
       speakerNotesLanguages.map((language) => [language, String(speakerNotes[language]).trim()]),
     ),
+    ...(parsed.evidence !== undefined ? { evidence: parseEvidence(parsed.evidence) } : {}),
+    ...(parsed.localization !== undefined ? { localization: parseLocalization(parsed.localization) } : {}),
   };
 }
 
@@ -461,6 +492,13 @@ export async function generateSlideReadyContent(
   trace?: (event: EnrichmentTraceEvent) => Promise<void>,
   shouldRetry?: () => boolean,
   sendReviewerPrompt?: (prompt: string) => Promise<string | undefined>,
+  contentOptions: {
+    source?: ChangelogPost;
+    evidence?: boolean;
+    baseline?: EnrichedPost;
+    fields?: string[];
+    slidesLanguage?: SupportedLanguage;
+  } = {},
 ): Promise<GeneratedContent> {
   let prompt = initialPrompt;
   let lastProblem = "Copilot returned no content.";
@@ -477,7 +515,16 @@ export async function generateSlideReadyContent(
     let issues: string[];
     try {
       candidate = parseGeneratedContent(content, speakerNotesLanguages);
-      issues = slideContentIssues(candidate, articleTitle, expectedSection, speakerNotesLanguages);
+      if (contentOptions.baseline) {
+        candidate = mergeRegeneratedContent(contentOptions.baseline, candidate, contentOptions.fields ?? []);
+      }
+      issues = slideContentIssues(candidate, articleTitle, expectedSection, speakerNotesLanguages, contentOptions.slidesLanguage);
+      if (contentOptions.source) {
+        issues.push(...evidenceIssues(candidate, contentOptions.source, speakerNotesLanguages, contentOptions.evidence));
+      }
+      if (contentOptions.slidesLanguage) {
+        issues.push(...localizationIssues(candidate.localization, contentOptions.slidesLanguage, speakerNotesLanguages));
+      }
     } catch (error) {
       issues = [error instanceof Error ? error.message : String(error)];
     }
@@ -501,6 +548,7 @@ export async function generateSlideReadyContent(
       content = await sendPrompt(prompt);
       lastContent = content;
     } catch (error) {
+      if (error instanceof CreditLimitError) throw error;
       problemKind = "request";
       requestTimedOut = isCopilotTimeout(error);
       lastProblem = `Copilot request failed: ${error instanceof Error ? error.message : String(error)}`;
@@ -570,6 +618,7 @@ export async function generateSlideReadyContent(
       reviewedContent = await sendReviewerPrompt(reviewerPrompt);
       problemKind = reviewedContent ? "validation" : "empty";
     } catch (error) {
+      if (error instanceof CreditLimitError) throw error;
       problemKind = "request";
       requestTimedOut = isCopilotTimeout(error);
       lastProblem = `Copilot reviewer request failed: ${error instanceof Error ? error.message : String(error)}`;
@@ -605,8 +654,8 @@ export async function generateSlideReadyContent(
   const suggestedAction = requestTimedOut
     ? "The timed-out request will not be retried automatically. Resume with --resume and lower --concurrency (try 1); use --request-timeout <seconds> to allow a slower model more time. Verify Copilot authentication and model availability if timeouts persist."
     : requestFailed
-    ? "Verify Copilot authentication and model availability, then retry with --concurrency 1 or choose another --model."
-    : "Retry the command or choose another --model. The downloaded source articles remain cached, so they will not be downloaded again.";
+      ? "Verify Copilot authentication and model availability, then retry with --concurrency 1 or choose another --model."
+      : "Retry the command or choose another --model. The downloaded source articles remain cached, so they will not be downloaded again.";
   const message = [
     `Could not prepare slide-ready content for "${articleTitle}" after ${attempts} attempt${attempts === 1 ? "" : "s"}.`,
     explanation,
@@ -665,7 +714,7 @@ function deterministicContent(
   const speakerNotes = Object.fromEntries(
     speakerNotesLanguages.map((language) => [
       language,
-      language === "it"
+      builtinLanguage(language) === "it"
         ? `Presentare "${post.title}". Spiegare i dettagli principali della modifica e invitare il pubblico a consultare la fonte per disponibilità, scadenze e azioni richieste.`
         : `Introduce "${post.title}". Explain the main details of the change and direct the audience to the source for availability, deadlines, and required actions.`,
     ]),
@@ -707,7 +756,7 @@ async function fetchImageDataUri(url: string): Promise<string | undefined> {
   return `data:${contentType};base64,${bytes.toString("base64")}`;
 }
 
-class ArticlePageUnavailableError extends Error {}
+class ArticlePageUnavailableError extends Error { }
 
 async function findArticleImage(post: ChangelogPost): Promise<string | undefined> {
   for (const url of post.imageUrls.slice(0, 3)) {
@@ -738,26 +787,14 @@ async function findArticleImage(post: ChangelogPost): Promise<string | undefined
   return socialImage ? fetchImageDataUri(new URL(socialImage, post.url).href) : undefined;
 }
 
+/**
+ * Process independent article sessions with bounded concurrency and stable output order.
+ * Review failures omit one article; operational failures stop new work and drain active peers.
+ * Budget pauses preserve accepted work and report through onBudgetPaused rather than retrying.
+ */
 export async function enrichWithCopilot(
   posts: ChangelogPost[],
-  options: {
-    model: string;
-    useAi: boolean;
-    slidesLanguage: SupportedLanguage;
-    speakerNotesLanguages: SupportedLanguage[];
-    concurrency?: number;
-    requestTimeoutMs?: number;
-    progressOffset?: number;
-    progressTotal?: number;
-    progressForPost?: (post: ChangelogPost) => number;
-    onPostEnriched?: (post: EnrichedPost) => Promise<void>;
-    trace?: (event: EnrichmentTraceEvent) => Promise<void>;
-    traceLogPath?: string;
-    onProgress?: (event: EnrichmentTraceEvent) => void;
-    onMessage?: (message: string) => void;
-    onUsage?: (usage: AiUsage) => Promise<void>;
-    clientFactory?: () => EnrichmentCopilotClient;
-  },
+  options: EnrichmentOptions,
 ): Promise<EnrichedPost[]> {
   let client: EnrichmentCopilotClient | undefined;
   let modelId = options.model;
@@ -767,7 +804,11 @@ export async function enrichWithCopilot(
     throw new Error("Copilot request timeout must be a positive whole number of milliseconds no greater than 2147483647.");
   }
   let failure: { error: unknown } | undefined;
-  const usage = createUsageTracker(options.onUsage);
+  const usage = createUsageTracker(options.onUsage, options.maximumNanoAiu === undefined ? undefined : {
+    maximumNanoAiu: options.maximumNanoAiu, previous: options.previousUsage ?? emptyAiUsage(),
+  });
+  let budgetPause: CreditLimitError | undefined;
+  const requiresAi = options.useAi && (posts.length === 0 || posts.some((post) => !options.acceptedContent?.has(post.url)));
   const writeMessage = options.onMessage ?? ((message: string) => { process.stderr.write(message); });
   const reportTrace = async (event: EnrichmentTraceEvent) => {
     options.onProgress?.(event);
@@ -775,7 +816,14 @@ export async function enrichWithCopilot(
   };
 
   try {
-    if (options.useAi) {
+    if (requiresAi) {
+      try { usage.assertCanStart(); }
+      catch (error) {
+        if (!(error instanceof CreditLimitError)) throw error;
+        budgetPause = error;
+      }
+    }
+    if (requiresAi && !budgetPause) {
       writeMessage("Starting Copilot runtime...\n");
       const startedAt = Date.now();
       if (options.clientFactory) {
@@ -797,14 +845,40 @@ export async function enrichWithCopilot(
     let stopStarting = false;
     let activeEnrichments = 0;
     let completedEnrichments = 0;
+    const sendTrackedPrompt = async (
+      session: EnrichmentCopilotSession,
+      sessionUsage: ReturnType<typeof usage.watch>,
+      prompt: string,
+    ): Promise<string | undefined> => {
+      // Persist the pending request and enforce its budget before making a paid call.
+      await sessionUsage.startRequest();
+      try {
+        // The SDK timeout starts only after send() and does not cancel generation.
+        const response = await withTimeout(
+          session.sendAndWait({ prompt }, requestTimeoutMs),
+          requestTimeoutMs,
+          new CopilotRequestTimeoutError(requestTimeoutMs),
+        );
+        await usage.flush();
+        await sessionUsage.finishRequest();
+        return response?.data.content;
+      } catch (error) {
+        if (isCopilotTimeout(error)) {
+          stopStarting = true;
+          sessionUsage.markInterrupted();
+        }
+        await sessionUsage.finishRequest();
+        throw error;
+      }
+    };
     writeMessage(
-      `${workerCount === 1 ? "Sequential" : "Parallel"} enrichment: ${workerCount} ${options.useAi ? "Copilot session" : "worker"}${
-        workerCount === 1 ? "" : "s"
+      `${workerCount === 1 ? "Sequential" : "Parallel"} enrichment: ${workerCount} ${options.useAi ? "Copilot session" : "worker"}${workerCount === 1 ? "" : "s"
       } for ${posts.length} article${posts.length === 1 ? "" : "s"}.\n`,
     );
     const enrichPost = async (index: number, worker: number): Promise<void> => {
       const post = posts[index];
-      const requiredSection = classifySection(post);
+      const regeneration = options.regeneration?.get(post.url);
+      const requiredSection = regeneration?.fields.length ? regeneration.baseline.section : classifySection(post);
       const progress =
         options.progressForPost?.(post) ??
         (options.progressOffset ?? 0) + index + 1;
@@ -819,25 +893,32 @@ export async function enrichWithCopilot(
         worker,
         progress,
       });
-      const imagePromise = findArticleImage(post).catch(async (error: unknown) => {
-        writeMessage(
-          `Warning: image download failed for "${post.title}": ${error instanceof Error ? error.message : String(error)}\n`,
+      const imagePromise = (regeneration
+        ? Promise.resolve(regeneration.baseline.imageDataUri)
+        : findArticleImage(post)).catch(async (error: unknown) => {
+          writeMessage(
+            `Warning: image download failed for "${post.title}": ${error instanceof Error ? error.message : String(error)}\n`,
+          );
+          await reportTrace({
+            event: "image_download_failed",
+            articleTitle: post.title,
+            worker,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return undefined;
+        }).then(
+          (image) => ({ image }),
+          (error: unknown) => ({ error }),
         );
-        await reportTrace({
-          event: "image_download_failed",
-          articleTitle: post.title,
-          worker,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return undefined;
-      }).then(
-        (image) => ({ image }),
-        (error: unknown) => ({ error }),
-      );
       let postFailure: { error: unknown } | undefined;
       try {
         let generated: GeneratedContent;
-        if (client) {
+        const accepted = options.acceptedContent?.get(post.url);
+        if (accepted) {
+          generated = accepted;
+        } else if (budgetPause) {
+          throw budgetPause;
+        } else if (client) {
           const activeClient = client;
           let session: EnrichmentCopilotSession | undefined;
           let reviewerSession: EnrichmentCopilotSession | undefined;
@@ -845,146 +926,43 @@ export async function enrichWithCopilot(
           let sessionFailure: { error: unknown } | undefined;
           try {
             session = await withTimeout(client.createSession({
-            model: modelId,
-            availableTools: [],
-            systemMessage: {
-              content:
-                "You are a presentation strategist and executive slide editor. Transform source material into accurate, informative slide explanations, not terse labels or marketing slogans. Return only strict JSON, never Markdown.",
-            },
-          }), requestTimeoutMs, new CopilotRequestTimeoutError(requestTimeoutMs, "session creation"));
-          const activeSession = session;
-          const sessionUsage = usage.watch(activeSession);
-          usageSessions.push(sessionUsage);
-          const detailsShape = Object.fromEntries(
-            sectionDetailKeys[requiredSection].map((key) => [key, "value"]),
-          );
-          const speakerNotesShape = Object.fromEntries(
-            options.speakerNotesLanguages.map((language) => [language, "presenter script"]),
-          );
-          const initialPrompt = [
-          "Create presentation-ready content for one article from the selected sources.",
-          "Do not assume the article concerns GitHub or Copilot unless the supplied source says so.",
-          `Write summary, notes, and detail values in ${options.slidesLanguage === "it" ? "Italian" : "English"}.`,
-          `Return strict JSON with section, summary, notes, details, and speakerNotes. Example shape: ${JSON.stringify({
-            section: requiredSection,
-            summary: "One short plain-language sentence",
-            notes: ["2-4 short practical bullets"],
-            details: detailsShape,
-            speakerNotes: speakerNotesShape,
-          })}`,
-          "Write for a live presentation, not an article summary. Every field must be usable on the slide without editing.",
-          "Prioritize the actual news and its main points. Do not optimize for the shortest possible wording.",
-          `Required section: ${requiredSection}. Do not choose a different section.`,
-          "Use takeaway-first explanations: state the concrete change, how it works, why it matters, and the audience action.",
-          "Before composing the JSON, identify the source-backed change, mechanism, practical effect, supported workflow, and essential constraints; distribute them across the matching cards. Return only the requested JSON, not a separate fact inventory.",
-          "In explanatory cards, pair the named capability or change with how it works or what it changes for the user. Add a specific workflow, prerequisite, limitation or migration step when the source provides one. Prefer 2-3 informative clauses, not a list of benefit labels.",
-          "Replace vague claims such as 'improves productivity', 'better collaboration', or 'faster review' with the source's concrete mechanism and practical effect. Do not invent speed, quality or cost improvements. Use the available word and character budget for facts, not adjectives.",
-          "Before returning, check whether a reader can explain what is different and what to do without opening the article. If a card is generic while relevant source facts remain unused, replace the generic wording with those facts within its limits. Do not pad short sources or invent missing instructions.",
-          "Summary: one complete sentence, preferably 18-32 words. It must explain the central news rather than repeat the title.",
-          "Lead the summary with the product, model, capability, or affected audience; never start with 'This update' or 'The announcement'.",
-          "Notes: 2-4 standalone bullets, preferably 8-16 words each.",
-          "Detail values: follow the section-specific targets below. Name/subject/feature values stay compact (at most 18 words and 130 characters); availability, retirementDate and audience stay concise (at most 26 words and 170 characters).",
-          "For Models keyCapabilities and useGuidance, IDE keyCapabilities and howToUse, and Retirements reasons and replacement, aim for 28-34 words per card, at most 36 words and 250 characters. Include 2-3 distinct source-backed points with practical context, not longer paraphrases of the summary.",
-          "Never invent details to fill space; use shorter text when the source has fewer facts. Keep essential qualifiers, prerequisites, exceptions and migration conditions on the slide.",
-          "Use plain language, active voice, parallel phrasing, and concrete product names, dates, plans, or actions only when supported.",
-          "Do not write paragraphs, ellipses, headings inside values, generic filler, exhaustive lists, navigation walkthroughs, or 'see the source'.",
-          "Prefer exact product names, rollout states, dates, plan names, policy changes, user impact, and required actions found in the article.",
-          "Each card must communicate a different source-backed point. Do not repeat the summary or another card.",
-          "For roundup articles, use feature or announcement to name the 2-3 headline changes instead of repeating the article title.",
-          "For capabilities, impact, reasons, and replacement, prefer 2-3 compact clauses separated by semicolons.",
-          "Use semicolons between distinct points; commas may separate names, dates, or qualifiers within a point. Keep all required replacement options and migration conditions within the word and character limits.",
-          "Move additional background, nonessential version lists, and supporting explanation into speakerNotes; keep prerequisites and caveats needed to act correctly on the slide.",
-          "Use exactly these detail keys by section:",
-          `Models: ${sectionDetailKeys.Models.join(", ")}. This section is exclusively for a newly available model. Use the exact model name; availability status, plans, and supported surfaces. In keyCapabilities explain 2-3 differentiating strengths and their practical benefits. In useGuidance use the form "Use for ...; avoid for ...", adding concrete workloads and source-stated limitations or trade-offs. Do not infer benchmarks or unsupported disadvantages. Model settings, policies, pricing, comparisons, or editor features are not Models.`,
-          `Enterprise Admins: ${sectionDetailKeys["Enterprise Admins"].join(", ")}. This section is exclusively for settings and administration performed by GitHub Enterprise owners or administrators in the GitHub.com or GitHub Enterprise web portal, settings UI, or management console. In announcement explain the portal-based administrative change and its scope; in impact explain governance consequences and required action. Put rollout and eligibility in availability, and name the exact enterprise role in audience. Exclude member features, generic Enterprise announcements, and administration performed only through APIs, CLIs, or other non-portal tools.`,
-          `Announcements: ${sectionDetailKeys.Announcements.join(", ")}. The announcement and impact cards occupy two-thirds of the width. For each, aim for 30-40 words, at most 44 words and 300 characters, in 2-3 source-backed clauses. In announcement explain what changes, its scope and concrete mechanisms or milestones; in impact explain practical consequences, supported costs or benefits, and required action or essential constraints. Do not merely repeat the title or summary. Availability and audience occupy one-third: aim for 8-18 words, at most 26 words and 170 characters, retaining eligibility conditions. Put status, rollout and supported surfaces in availability; affected plans and roles in audience. Never invent details to fill space; use shorter text when the source has fewer facts. Keep essential qualifiers on the slide and move additional explanation to speakerNotes.`,
-          `IDE: ${sectionDetailKeys.IDE.join(", ")}. Name the feature; supported editors and rollout status. In keyCapabilities explain 2-3 concrete improvements and their effect on daily development. In howToUse describe a specific first action, essential setup or prerequisite, and the next useful step or expected result, without a navigation walkthrough.`,
-          `Retirements: ${sectionDetailKeys.Retirements.join(", ")}. Name the retired item; exact dates and phases. In reasons explain the stated rationale and operational impact. In replacement name the supported alternatives, who each applies to, and the required migration action or verification. Preserve exceptions and deadlines; do not imply migration is automatic unless stated. Use "Not stated" only when absent.`,
-          "Availability is product status, eligibility, supported surfaces, or plans. Never substitute the article publication date.",
-          options.slidesLanguage === "it"
-            ? "Inizia keyCapabilities con verbi d'azione orientati ai benefici, per esempio 'Migliora la revisione, semplifica la navigazione, organizza le sessioni'."
-            : "Start keyCapabilities with benefit-oriented action verbs, for example 'Improve review, simplify navigation, organize sessions'.",
-          "Make howToUse a concrete first action; do not merely restate that the feature can be used.",
-          "Illustrative source, not facts about the actual article: The Agents view is in preview in VS Code. It groups sessions by task, preserves each chat's context when resumed, and shows proposed file edits as diffs. Open Agents, select a session, then review its diff before accepting edits. Follow the specificity of the example below, but never copy its facts unless supported by the actual article.",
-          `Illustrative output: ${JSON.stringify(options.slidesLanguage === "it" ? {
-            summary: "La vista Agents in anteprima in VS Code raggruppa le sessioni per lavoro e conserva il contesto, mostrando le modifiche come diff prima di accettarle.",
-            details: {
-              feature: "Sessioni agente raggruppate per lavoro",
-              availability: "Anteprima in VS Code",
-              keyCapabilities: "Organizza le sessioni per lavoro mantenendo insieme le conversazioni correlate; riprendi ogni chat con il suo contesto salvato; confronta le modifiche proposte nei diff prima di accettarle nei file del progetto.",
-              howToUse: "Apri la vista Agents in anteprima in VS Code e seleziona una sessione del lavoro; esamina il diff prima di accettare le modifiche oppure riprendi la chat con il contesto salvato.",
-            },
-          } : {
-            summary: "VS Code's preview Agents view groups sessions by task and preserves chat context, letting developers resume a discussion and inspect proposed edits before accepting them.",
-            details: {
-              feature: "Agent sessions grouped by task",
-              availability: "Preview in VS Code",
-              keyCapabilities: "Organize sessions by task to keep related work together; resume each chat with its previously saved context intact; compare proposed edits as diffs before accepting changes to project files.",
-              howToUse: "Open the preview Agents view in VS Code and select a session for the task; inspect its proposed diff before accepting edits, or resume the chat with its saved context.",
-            },
-          })}`,
-          `Speaker notes must contain exactly these language keys: ${options.speakerNotesLanguages.join(", ")}. Write each script in its matching language.`,
-          "Speaker notes must be natural presenter scripts of 80-140 words, accurate to the source, and must not introduce unsupported claims.",
-          "Classification is already determined from the source. Models is reserved only for articles announcing that a specific new model is available or rolling out.",
-          `Title: ${post.title}`,
-          `Published: ${post.publishedAt}`,
-          `Article: ${post.plainText.slice(0, 12_000)}`,
-        ].join("\n\n");
+              model: modelId,
+              availableTools: [],
+              systemMessage: {
+                content:
+                  "You are a presentation strategist and executive slide editor. Transform source material into accurate, informative slide explanations, not terse labels or marketing slogans. Return only strict JSON, never Markdown.",
+              },
+            }), requestTimeoutMs, new CopilotRequestTimeoutError(requestTimeoutMs, "session creation"));
+            const activeSession = session;
+            const sessionUsage = usage.watch(activeSession);
+            usageSessions.push(sessionUsage);
+            const initialPrompt = buildEnrichmentPrompt(post, options, requiredSection, regeneration);
             generated = await generateSlideReadyContent(
-            async (prompt) => {
-              await sessionUsage.startRequest();
-              try {
-                // The SDK timeout starts only after send() and does not cancel generation.
-                const response = await withTimeout(
-                  activeSession.sendAndWait({ prompt }, requestTimeoutMs),
-                  requestTimeoutMs,
-                  new CopilotRequestTimeoutError(requestTimeoutMs),
-                );
-                await usage.flush();
-                return response?.data.content;
-              } catch (error) {
-                if (isCopilotTimeout(error)) {
-                  stopStarting = true;
-                  sessionUsage.markInterrupted();
-                }
-                throw error;
-              }
-            },
-            initialPrompt,
-            options.speakerNotesLanguages,
-            post.title,
-            requiredSection,
-            (event) => reportTrace({ ...event, worker, progress }),
-            () => !stopStarting && firstFailure === undefined,
-            async (prompt) => {
-              reviewerSession = await withTimeout(activeClient.createSession({
-                model: modelId,
-                availableTools: [],
-                systemMessage: {
-                  content:
-                    "You are a meticulous presentation content reviewer. Repair rejected slide JSON using only the supplied source and instructions. Preserve factual qualifiers and return strict JSON only.",
-                },
-              }), requestTimeoutMs, new CopilotRequestTimeoutError(requestTimeoutMs, "reviewer session creation"));
-              const reviewerUsage = usage.watch(reviewerSession);
-              usageSessions.push(reviewerUsage);
-              await reviewerUsage.startRequest();
-              try {
-                const response = await withTimeout(
-                  reviewerSession.sendAndWait({ prompt }, requestTimeoutMs),
-                  requestTimeoutMs,
-                  new CopilotRequestTimeoutError(requestTimeoutMs),
-                );
-                await usage.flush();
-                return response?.data.content;
-              } catch (error) {
-                if (isCopilotTimeout(error)) {
-                  stopStarting = true;
-                  reviewerUsage.markInterrupted();
-                }
-                throw error;
-              }
-            },
-          );
+              (prompt) => sendTrackedPrompt(activeSession, sessionUsage, prompt),
+              initialPrompt,
+              options.speakerNotesLanguages,
+              post.title,
+              requiredSection,
+              (event) => reportTrace({ ...event, worker, progress }),
+              () => !stopStarting && firstFailure === undefined,
+              async (prompt) => {
+                reviewerSession = await withTimeout(activeClient.createSession({
+                  model: modelId,
+                  availableTools: [],
+                  systemMessage: {
+                    content:
+                      "You are a meticulous presentation content reviewer. Repair rejected slide JSON using only the supplied source and instructions. Preserve factual qualifiers and return strict JSON only.",
+                  },
+                }), requestTimeoutMs, new CopilotRequestTimeoutError(requestTimeoutMs, "reviewer session creation"));
+                const reviewerUsage = usage.watch(reviewerSession);
+                usageSessions.push(reviewerUsage);
+                return sendTrackedPrompt(reviewerSession, reviewerUsage, prompt);
+              },
+              {
+                source: post, evidence: options.evidence, baseline: regeneration?.baseline,
+                fields: regeneration?.fields, slidesLanguage: options.slidesLanguage,
+              },
+            );
           } catch (error) {
             sessionFailure = { error };
             if (!(error instanceof SlideReviewFailedError)) stopStarting = true;
@@ -1014,14 +992,17 @@ export async function enrichWithCopilot(
               await usage.flush();
             } catch (usageError) {
               const previousFailure = cleanupFailure ?? sessionFailure;
-              cleanupFailure = { error: previousFailure
-                ? new AggregateError([previousFailure.error, usageError],
-                  `${String(previousFailure.error)}\n${String(usageError)}`, { cause: previousFailure.error })
-                : usageError };
+              cleanupFailure = {
+                error: previousFailure
+                  ? new AggregateError([previousFailure.error, usageError],
+                    `${String(previousFailure.error)}\n${String(usageError)}`, { cause: previousFailure.error })
+                  : usageError
+              };
             }
             if (cleanupFailure) throw cleanupFailure.error;
           }
         } else {
+          if (options.evidence) throw new Error("--evidence requires AI generation or previously accepted evidence.");
           generated = simplifyDeterministicContent(
             deterministicContent(post, options.speakerNotesLanguages),
           );
@@ -1069,6 +1050,16 @@ export async function enrichWithCopilot(
         try {
           await enrichPost(index, worker);
         } catch (error) {
+          if (error instanceof CreditLimitError) {
+            stopStarting = true;
+            budgetPause = error;
+            writeMessage(`Warning: ${error.message}\n`);
+            await options.onBudgetPaused?.(error);
+            await reportTrace({
+              event: "article_processing_paused", articleTitle: posts[index].title, worker, error: error.message,
+            });
+            return;
+          }
           if (error instanceof SlideReviewFailedError) {
             const skippedPost = posts[index];
             const itemNumber =
@@ -1096,33 +1087,33 @@ export async function enrichWithCopilot(
             }
           }
           stopStarting = true;
-            const failedPost = posts[index];
-            const itemNumber =
-              options.progressForPost?.(failedPost) ??
-              (options.progressOffset ?? 0) + index + 1;
-            const total = options.progressTotal ?? posts.length;
-            const processingFailure = new Error(
-              [
-                `Article processing failed at item ${itemNumber}/${total}: "${failedPost?.title ?? "Unknown article"}".`,
-                error instanceof Error ? error.message : String(error),
-                "No final presentation was written. Completed articles are preserved in the checkpoint and source cache; rerun with --resume after correcting the reported problem.",
-                ...(options.traceLogPath ? [`Trace log: ${options.traceLogPath}`] : []),
-              ].join("\n"),
-              { cause: error },
-            );
-            firstFailure ??= processingFailure;
-            workerFailures.push(processingFailure);
-            try {
-              await reportTrace({
-                event: "article_processing_failed",
-                articleTitle: failedPost?.title ?? "Unknown article",
-                worker,
-                progress: itemNumber,
-                error: error instanceof Error ? error.message : String(error),
-              });
-            } catch (traceError) {
-              workerFailures.push(new Error(`Trace logging also failed: ${String(traceError)}`, { cause: traceError }));
-            }
+          const failedPost = posts[index];
+          const itemNumber =
+            options.progressForPost?.(failedPost) ??
+            (options.progressOffset ?? 0) + index + 1;
+          const total = options.progressTotal ?? posts.length;
+          const processingFailure = new Error(
+            [
+              `Article processing failed at item ${itemNumber}/${total}: "${failedPost?.title ?? "Unknown article"}".`,
+              error instanceof Error ? error.message : String(error),
+              "No final presentation was written. Completed articles are preserved in the checkpoint and source cache; rerun with --resume after correcting the reported problem.",
+              ...(options.traceLogPath ? [`Trace log: ${options.traceLogPath}`] : []),
+            ].join("\n"),
+            { cause: error },
+          );
+          firstFailure ??= processingFailure;
+          workerFailures.push(processingFailure);
+          try {
+            await reportTrace({
+              event: "article_processing_failed",
+              articleTitle: failedPost?.title ?? "Unknown article",
+              worker,
+              progress: itemNumber,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          } catch (traceError) {
+            workerFailures.push(new Error(`Trace logging also failed: ${String(traceError)}`, { cause: traceError }));
+          }
           return;
         }
       }

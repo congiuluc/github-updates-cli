@@ -158,6 +158,11 @@ test.each([false, true])("adds multiple --rss sources with AI & ML opt-in=%s", a
   const duplicateFeed = "https://example.org/rss";
   const networkImport = `data:text/javascript,${encodeURIComponent(`
     import { appendFileSync } from "node:fs";
+    import { tmpdir } from "node:os";
+    import { resolve } from "node:path";
+    if (resolve(tmpdir()) !== ${JSON.stringify(resolve(outputDirectory))}) {
+      throw new Error("The RSS test must use an isolated temporary directory on every platform.");
+    }
     globalThis.fetch = async (input) => {
       const url = String(input);
       appendFileSync(${JSON.stringify(requestLog)}, JSON.stringify(url) + "\\n");
@@ -187,7 +192,7 @@ test.each([false, true])("adds multiple --rss sources with AI & ML opt-in=%s", a
     "--limit", "3", "--no-ai", "--website", "--output", outputDirectory,
     ...(includeAiMl ? ["-a"] : []),
   ], {
-    cwd: resolve("."), env: { ...cliEnvironment, TEMP: outputDirectory, TMP: outputDirectory },
+    cwd: resolve("."), env: { ...cliEnvironment, TMPDIR: outputDirectory, TEMP: outputDirectory, TMP: outputDirectory },
     timeout: 60_000,
   });
   expect(stdout).toContain("Presentation:");
@@ -310,7 +315,7 @@ test.each([["--help"], ["-h"], ["--version"], ["-V"], ["version"], ["update", "-
       export async function resolve(specifier, context, nextResolve) {
         if (specifier === "@github/copilot-sdk") throw new Error("Unexpected SDK import");
         const result = await nextResolve(specifier, context);
-        if (/\\/(collector|enricher|presentation|html)\\.(ts|js)$/.test(result.url)) {
+        if (/\\/(workflow|collector|enricher|presentation|html)\\.(ts|js)$/.test(result.url)) {
           throw new Error("Unexpected generation import: " + result.url);
         }
         return result;
@@ -545,8 +550,12 @@ test("--verbose also exposes failure events during execution", async () => {
   });
 }, 60_000);
 
-test("--resume reuses completed entries and removes the checkpoint after success", async () => {
+test.each([false, true])("--resume checks source changes before reusing completed entries (changed: %s)", async (sourceChanged) => {
   outputDirectory = await mkdtemp(join(tmpdir(), "copilot-changelog-cli-"));
+  const { parseChangelogFeed } = await import("./collector.js");
+  const [source] = parseChangelogFeed(await readFile(resolve("test/fixtures/feed.xml"), "utf8"), {
+    from: new Date("2026-08-01"), to: new Date("2026-08-31T23:59:59.999Z"),
+  });
   const checkpointPath = join(
     outputDirectory,
     ".copilot-changelog-2026-08-01-to-2026-08-31.checkpoint.json",
@@ -562,13 +571,8 @@ test("--resume reuses completed entries and removes the checkpoint after success
       speakerNotesLanguages: ["en"],
     },
     completed: [{
-      title: "Copilot model controls arrive in the IDE",
-      url: "https://github.blog/changelog/2026-08-15-copilot-model-controls",
-      publishedAt: "2026-08-15T10:00:00.000Z",
-      plainText: "Developers can now select models directly in their editor.",
-      html: "<p>Developers can now select models directly in their editor.</p>",
-      imageUrls: [],
-      links: [],
+      ...source,
+      plainText: sourceChanged ? "Previously saved source text." : source.plainText,
       section: "Models",
       summary: "Developers can choose models directly in their editor.",
       notes: ["Choose a model per task", "Document preferred team models"],
@@ -602,7 +606,12 @@ test("--resume reuses completed entries and removes the checkpoint after success
   );
 
   expect(stderr).toContain("Resuming after 1 completed entries.");
-  expect(stderr).not.toContain("Enriching 1/1");
+  if (sourceChanged) {
+    expect(stderr).toContain("Source content changed for 1 accepted articles");
+    expect(stderr).toContain("Enriching 1/1");
+  } else {
+    expect(stderr).not.toContain("Enriching 1/1");
+  }
   await expect(access(checkpointPath)).rejects.toThrow();
   await access(join(outputDirectory, "copilot-changelog-2026-08-01-to-2026-08-31.pptx"));
 }, 10_000);

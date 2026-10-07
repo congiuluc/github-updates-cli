@@ -113,7 +113,7 @@ test.each([
   ["invalid AI usage", (state: CheckpointState) => ({ ...state, usage: { ...emptyAiUsage(), totalNanoAiu: -1 } })],
   ["null", () => null],
   ["missing language array", (state: CheckpointState) => ({ ...state, config: { ...state.config, speakerNotesLanguages: undefined } })],
-  ["invalid language", (state: CheckpointState) => ({ ...state, config: { ...state.config, slidesLanguage: "fr" } })],
+  ["invalid language", (state: CheckpointState) => ({ ...state, config: { ...state.config, slidesLanguage: "not_a_locale" } })],
   ["invalid content version", (state: CheckpointState) => ({ ...state, config: { ...state.config, contentVersion: "4" } })],
   ["non-string URL", (state: CheckpointState) => ({ ...state, config: { ...state.config, postUrls: [42] } })],
   ["duplicate URLs", (state: CheckpointState) => ({ ...state, config: { ...state.config, postUrls: [...state.config.postUrls, ...state.config.postUrls] } })],

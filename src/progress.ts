@@ -91,6 +91,7 @@ export function createProgressDisplay(options: {
         case "article_processing_completed": status = "completed"; completed++; break;
         case "article_review_skipped": status = "omitted"; completed++; omitted++; break;
         case "article_processing_failed": status = `failed: ${event.error}`; break;
+        case "article_processing_paused": status = "paused: AI budget"; break;
         case "image_download_failed": status = "image unavailable"; break;
       }
       workers[event.worker - 1] = `Worker ${event.worker}: ${status} - ${event.articleTitle}`;

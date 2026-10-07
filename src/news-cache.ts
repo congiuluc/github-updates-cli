@@ -77,6 +77,10 @@ async function writeEntry(path: string, entry: CachedNews): Promise<void> {
   }
 }
 
+/**
+ * Cache downloaded source text with expiry and share concurrent reads of the same resource.
+ * Invalid/expired records are refetched; filesystem and network errors remain visible.
+ */
 export async function readThroughNewsCache(
   url: string,
   maximumAgeMs: number,

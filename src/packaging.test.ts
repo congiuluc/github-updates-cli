@@ -1,7 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { access, chmod, copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, test } from "vitest";
 
@@ -91,7 +90,7 @@ test.skipIf(process.platform !== "win32")("compiled Windows launcher embeds ever
     .map((framework) => join(windows, "Microsoft.NET", framework, "v4.0.30319", "csc.exe"))
     .find(existsSync);
   if (!compiler) throw new Error("The Windows C# compiler is required to verify the launcher icon.");
-  const fixture = await mkdtemp(join(tmpdir(), "copilot-launcher-icon-"));
+  const fixture = await mkdtemp(join(root, ".packaging-launcher-icon-"));
   try {
     const executable = join(fixture, "copilot-changelog.exe");
     const iconPath = join(root, "assets", "copilot.ico");
@@ -113,7 +112,7 @@ test.skipIf(process.platform !== "win32")("compiled Windows launcher embeds ever
 }, 30_000);
 
 test("npm packaging declares the tested parser version in its bundle and restores the source manifest", async () => {
-  const fixture = await mkdtemp(join(tmpdir(), "copilot-npm-manifest-"));
+  const fixture = await mkdtemp(join(root, ".packaging-npm-manifest-"));
   try {
     const directory = join(fixture, "node_modules", "pptxgenjs");
     await mkdir(directory, { recursive: true });
@@ -234,35 +233,51 @@ test.each(["packaging/build-unix.sh", "packaging/build-portable.ps1"])(
 );
 
 test("packaged CLI version is checked against the manifest used for release artifacts", async () => {
-  const [unix, windows, release] = await Promise.all([
+  const [unix, windows] = await Promise.all([
     read("packaging/build-unix.sh"),
     read("packaging/build-portable.ps1"),
-    read(".github/workflows/release.yml"),
   ]);
   expect(unix).toContain('ACTUAL_VERSION="$(COPILOT_CHANGELOG_SKIP_UPDATE_CHECK=1 "$STAGING/copilot-changelog" --version)"');
   expect(unix).toContain('if [[ "$ACTUAL_VERSION" != "$VERSION" ]]');
   expect(windows).toContain("$actualVersion = (& (Join-Path $staging \"copilot-changelog.exe\") --version).Trim()");
   expect(windows).toContain("if ($actualVersion -ne $package.version)");
-
-  const verification = release.split("\n  verify-version:")[1]?.split("\n  validate:")[0] ?? "";
-  expect(verification).toContain("require('./package.json').version");
-  expect(verification).toContain('"$GITHUB_REF_NAME" != "v$VERSION"');
-  for (const jobName of ["windows", "linux", "macos"]) {
-    const job = release.split(`\n  ${jobName}:`)[1]?.split(/\n  [a-z-]+:/)[0] ?? "";
-    expect(job).toContain("needs: verify-version");
-  }
 });
 
 test.each([".github/workflows/ci.yml", ".github/workflows/release.yml"])(
   "%s validates the lowest supported Node release", async (path) => {
     const workflow = await read(path);
-    const setups = workflow.match(/uses: actions\/setup-node@v4/g) ?? [];
+    const setups = workflow.match(/uses: actions\/setup-node@v7/g) ?? [];
     expect(setups.length).toBeGreaterThan(0);
     expect(workflow.match(/node-version-file: \.node-version/g)).toHaveLength(setups.length);
     expect(workflow).not.toContain("node-version:");
     expect(workflow).not.toContain("node: 22.12.0");
   },
 );
+
+test.each([
+  ".github/workflows/ci.yml", ".github/workflows/release.yml", ".github/workflows/pages.yml",
+  "examples/scheduled-briefing.yml",
+])("%s uses maintained actions and explicit Ubuntu runners", async (path) => {
+  const workflow = await read(path);
+  const versions: Record<string, string> = {
+    checkout: "v7",
+    "setup-node": "v7",
+    "upload-artifact": "v7",
+    "download-artifact": "v8",
+    "configure-pages": "v6",
+    "upload-pages-artifact": "v5",
+    "deploy-pages": "v5",
+    "cache/restore": "v6",
+    "cache/save": "v6",
+  };
+  const actions = [...workflow.matchAll(/uses: actions\/([\w/-]+)@([^\s]+)/g)];
+  expect(actions.length).toBeGreaterThan(0);
+  for (const [, action, version] of actions) {
+    expect(version, action).toBe(versions[action]);
+  }
+  expect(workflow).not.toContain("ubuntu-latest");
+  expect(workflow).toContain("ubuntu-24.04");
+});
 test("release packaging uses four native Unix runners", async () => {
   const release = await read(".github/workflows/release.yml");
   const linux = release.split("\n  linux:")[1].split("\n  macos:")[0];

@@ -1,6 +1,6 @@
 import type { AssistantUsageEvent, SessionEventHandler } from "@github/copilot-sdk";
 import { expect, test, vi } from "vitest";
-import { createUsageTracker, emptyAiUsage, formatAiUsage, addAiUsage, isAiUsage } from "./usage.js";
+import { createUsageTracker, emptyAiUsage, formatAiUsage, addAiUsage, isAiUsage, parseCreditLimit, CreditLimitError } from "./usage.js";
 
 function session() {
   let listener: SessionEventHandler | undefined;
@@ -14,6 +14,43 @@ function session() {
     },
   };
 }
+
+test("parses exact fractional credit limits and rejects invalid budgets", () => {
+  expect(parseCreditLimit("0")).toBe(0);
+  expect(parseCreditLimit("1.000000001")).toBe(1_000_000_001);
+  for (const invalid of ["-1", "NaN", "1x", "1e3", "0.0000000001", "99999999999999999"]) {
+    expect(() => parseCreditLimit(invalid)).toThrow("--max-credits");
+  }
+});
+
+test("enforces cumulative budgets before requests while allowing active calls to settle", async () => {
+  const tracker = createUsageTracker(undefined, {
+    maximumNanoAiu: 1e9, previous: { ...emptyAiUsage(), totalNanoAiu: 0.75e9 },
+  });
+  const first = session();
+  const second = session();
+  const a = tracker.watch(first);
+  const b = tracker.watch(second);
+  await Promise.all([a.startRequest(), b.startRequest()]);
+  first.emit("one", { model: "auto", copilotUsage: { totalNanoAiu: 0.25e9 } });
+  await a.finishRequest();
+  await expect(a.startRequest()).rejects.toBeInstanceOf(CreditLimitError);
+  second.emit("two", { model: "auto", copilotUsage: { totalNanoAiu: 0.5e9 } });
+  await b.finishRequest();
+  await tracker.flush();
+});
+
+test("fails closed on missing billing reports or incomplete resumed history", async () => {
+  const tracker = createUsageTracker(undefined, { maximumNanoAiu: 1e9, previous: emptyAiUsage() });
+  const watched = tracker.watch({});
+  await watched.startRequest();
+  await watched.finishRequest();
+  await expect(watched.startRequest()).rejects.toThrow("credit usage is incomplete");
+  const resumed = createUsageTracker(undefined, {
+    maximumNanoAiu: 1e9, previous: { ...emptyAiUsage(), historyIncomplete: true },
+  });
+  expect(() => resumed.assertCanStart()).toThrow("credit usage is incomplete");
+});
 
 test("captures concurrent sessions, retries and reviewer usage without duplicate events", async () => {
   const saved = vi.fn().mockResolvedValue(undefined);

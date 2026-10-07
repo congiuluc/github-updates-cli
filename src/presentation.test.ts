@@ -7,8 +7,74 @@ import { afterEach, expect, test, vi } from "vitest";
 import { writePresentation } from "./presentation.js";
 import type { EnrichedPost } from "./types.js";
 import { sectionDetailKeys } from "./types.js";
+import { sections } from "./types.js";
+import { parseLocalization } from "./locales.js";
 
 let outputDirectory: string | undefined;
+
+test.each([
+  ["ja", "開発者向けの新しい機能を紹介して関連する作業の変更内容と必要な設定を詳しく説明します"],
+  ["ar", "تحديثات المطورين ومراجعة الجلسات"],
+] as const)("renders localized headings and appropriate text direction for %s", async (locale, translatedTitle) => {
+  outputDirectory = await mkdtemp(join(tmpdir(), "copilot-locale-deck-"));
+  const label = locale === "ja" ? "新機能" : "التحديثات";
+  const localization = parseLocalization({
+    articleTitle: translatedTitle,
+    evidenceHeading: label,
+    slides: { locale, text: {
+      changelog: label, title: label, update: label, updates: label, section: label,
+      sectionNames: Object.fromEntries(sections.map((section) => [section, label])),
+      detailLabels: Object.fromEntries([...new Set(Object.values(sectionDetailKeys).flat())].map((key) => [key, label])),
+    } },
+    speakerNotes: { [locale]: {
+      introduction: `${label}: {count}, {from}, {to}`,
+      sections: Object.fromEntries(sections.map((section) => [section, `${label}: {count}`])),
+    } },
+  });
+  const post: EnrichedPost = {
+    title: "Original source title", url: "https://example.com/source", publishedAt: "2026-08-15T00:00:00Z",
+    plainText: "Source text.", html: "", imageUrls: [], links: [],
+    section: "IDE", summary: `${label}。`, notes: [label, label],
+    details: { feature: label, availability: label, keyCapabilities: label, howToUse: label },
+    speakerNotes: { [locale]: label }, localization,
+  };
+  const path = await writePresentation([post], outputDirectory, new Date("2026-08-01"), new Date("2026-08-31"),
+    { slidesLanguage: locale, speakerNotesLanguages: [locale] });
+  const zip = await JSZip.loadAsync(await readFile(path));
+  const hero = await zip.file("ppt/slides/slide3.xml")!.async("string");
+  expect(hero).not.toContain("Original source title");
+  expect(hero).toContain(label);
+  const texts = [...hero.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map((match) => match[1]);
+  if (locale === "ja") {
+    expect(texts.filter((text) => translatedTitle.includes(text)).length).toBeGreaterThan(1);
+    expect(texts.join("")).toContain(translatedTitle);
+  } else {
+    expect(hero).toContain('rtl="1"');
+  }
+  const coverNotes = await zip.file("ppt/notesSlides/notesSlide1.xml")!.async("string");
+  expect(coverNotes).toContain(label);
+  expect(coverNotes).not.toContain("{count}");
+});
+
+test("retains claim quotations in article speaker notes", async () => {
+  outputDirectory = await mkdtemp(join(tmpdir(), "copilot-evidence-notes-"));
+  const post: EnrichedPost = {
+    title: "Source-backed update", url: "https://example.com/source", publishedAt: "2026-08-15T00:00:00Z",
+    plainText: "The preview requires administrator approval.", html: "", imageUrls: [], links: [],
+    section: "IDE", summary: "Administrators approve access to the preview.", notes: ["Confirm eligibility"],
+    details: { feature: "Preview access", availability: "Preview", keyCapabilities: "Improve access controls", howToUse: "Request approval" },
+    speakerNotes: { en: "Explain approval requirements." },
+    evidence: [{ field: "summary", quote: "The preview requires administrator approval.", url: "https://example.com/source" }],
+  };
+  const path = await writePresentation([post], outputDirectory, new Date("2026-08-01"), new Date("2026-08-31"),
+    { slidesLanguage: "en", speakerNotesLanguages: ["en"] });
+  const zip = await JSZip.loadAsync(await readFile(path));
+  for (const slide of [3, 4]) {
+    const notes = await zip.file(`ppt/notesSlides/notesSlide${slide}.xml`)!.async("string");
+    expect(notes).toContain("The preview requires administrator approval.");
+    expect(notes).toContain("https://example.com/source");
+  }
+});
 
 afterEach(async () => {
   vi.restoreAllMocks();

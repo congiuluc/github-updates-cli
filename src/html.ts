@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { outputFileStem } from "./output-naming.js";
 import { sections, type EnrichedPost } from "./types.js";
+import { isRtlLocale } from "./locales.js";
 
 function escapeHtml(value: string): string {
   return value
@@ -23,11 +24,17 @@ function sectionId(section: string): string {
   return section.toLowerCase().replaceAll(" ", "-");
 }
 
-function postCard(post: EnrichedPost): string {
+function postCard(post: EnrichedPost, locale: string): string {
   const image = post.imageDataUri
     ? `<img class="card-image" src="${post.imageDataUri}" alt="">`
     : `<div class="image-placeholder" aria-hidden="true"><span>${escapeHtml(post.section)}</span></div>`;
   const notes = post.notes.map((note) => `<li>${escapeHtml(note)}</li>`).join("");
+  const evidence = post.evidence?.length ? `<details class="evidence"><summary>Source evidence</summary>
+    <p>Supporting quotations for human review; not an automated factual audit.</p>
+    <ul>${post.evidence.map((entry) => `<li><strong>${escapeHtml(entry.field)}</strong>
+      <blockquote>${escapeHtml(entry.quote)}</blockquote>
+      <a href="${escapeHtml(entry.url)}" target="_blank" rel="noreferrer">Source article</a></li>`).join("")}</ul>
+    </details>` : "";
   const links = post.links
     .slice(0, 6)
     .map(
@@ -36,8 +43,8 @@ function postCard(post: EnrichedPost): string {
     )
     .join("");
 
-  return `<article class="card" data-search="${escapeHtml(
-    `${post.title} ${post.summary} ${post.notes.join(" ")}`.toLowerCase(),
+  return `<article class="card" lang="${escapeHtml(locale)}" dir="${isRtlLocale(locale) ? "rtl" : "ltr"}" data-search="${escapeHtml(
+    `${post.title} ${post.localization?.articleTitle ?? ""} ${post.summary} ${post.notes.join(" ")}`.toLowerCase(),
   )}">
     ${image}
     <div class="card-body">
@@ -45,24 +52,25 @@ function postCard(post: EnrichedPost): string {
         new Date(post.publishedAt),
         "long",
       )}</time>${post.author ? `<span>${escapeHtml(post.author)}</span>` : ""}</div>
-      <h3>${escapeHtml(post.title)}</h3>
+      <h3>${escapeHtml(post.localization?.articleTitle ?? post.title)}</h3>
       <p class="summary">${escapeHtml(post.summary)}</p>
       <h4>What changed</h4>
       <ul>${notes}</ul>
       <div class="links">${links}</div>
-      <a class="source" href="${escapeHtml(post.url)}" target="_blank" rel="noreferrer">Read the original changelog</a>
+      <a class="source" href="${escapeHtml(post.url)}" target="_blank" rel="noreferrer">Read the original article</a>
+      ${evidence}
     </div>
   </article>`;
 }
 
-export function renderWebsite(posts: EnrichedPost[], from: Date, to: Date): string {
+export function renderWebsite(posts: EnrichedPost[], from: Date, to: Date, locale = "en"): string {
   const content = sections
     .map((section) => {
       const items = posts.filter((post) => post.section === section);
       if (!items.length) return "";
       return `<section id="${sectionId(section)}" class="section">
         <div class="section-heading"><div><span class="eyebrow">SECTION</span><h2>${section}</h2></div><span class="count">${items.length}</span></div>
-        <div class="grid">${items.map(postCard).join("")}</div>
+        <div class="grid">${items.map((post) => postCard(post, locale)).join("")}</div>
       </section>`;
     })
     .join("");
@@ -184,9 +192,10 @@ export async function writeWebsite(
   outputDirectory: string,
   from: Date,
   to: Date,
+  locale = "en",
 ): Promise<string> {
   await mkdir(outputDirectory, { recursive: true });
   const path = join(outputDirectory, `${outputFileStem(from, to)}.html`);
-  await writeFile(path, renderWebsite(posts, from, to), "utf8");
+  await writeFile(path, renderWebsite(posts, from, to, locale), "utf8");
   return path;
 }

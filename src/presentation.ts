@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import JSZip from "jszip";
 import PptxGenJS from "pptxgenjs";
 import { outputFileStem } from "./output-naming.js";
+import { formatEvidence } from "./generation.js";
+import { builtinLanguage, isRtlLocale, localeName, type DeckLocalization, type PresentationStrings } from "./locales.js";
 import {
   sections,
   sectionDetailKeys,
@@ -42,6 +44,7 @@ const copilotLogoPath = fileURLToPath(new URL("../assets/copilot.png", import.me
 interface PresentationOptions {
   slidesLanguage: SupportedLanguage;
   speakerNotesLanguages: SupportedLanguage[];
+  localization?: DeckLocalization;
 }
 
 interface ArticleFooter {
@@ -135,21 +138,21 @@ const copy = {
       audience: "CHI È COINVOLTO",
     },
   },
-} satisfies Record<
-  SupportedLanguage,
-  {
-    changelog: string;
-    title: string;
-    update: string;
-    updates: string;
-    section: string;
-    sectionNames: Record<Section, string>;
-    detailLabels: Record<SlideDetailKey, string>;
-  }
->;
+} satisfies Record<"en" | "it", PresentationStrings>;
 
-function sectionLabel(section: Section, language: SupportedLanguage): string {
-  return copy[language].sectionNames[section].toUpperCase();
+function presentationCopy(options: PresentationOptions): PresentationStrings {
+  return options.localization?.slides?.locale === options.slidesLanguage
+    ? options.localization.slides.text
+    : copy[builtinLanguage(options.slidesLanguage) ?? "en"];
+}
+
+function localeText(locale: SupportedLanguage): TextOptions {
+  const rtlMode = isRtlLocale(locale);
+  return { lang: locale, rtlMode, ...(rtlMode ? { align: "right" } : {}) };
+}
+
+function sectionLabel(section: Section, options: PresentationOptions): string {
+  return presentationCopy(options).sectionNames[section].toLocaleUpperCase(options.slidesLanguage);
 }
 
 function formatDate(
@@ -157,7 +160,7 @@ function formatDate(
   style: "medium" | "long",
   language: SupportedLanguage,
 ): string {
-  return date.toLocaleDateString(language === "it" ? "it-IT" : "en-US", {
+  return date.toLocaleDateString(language, {
     dateStyle: style,
     timeZone: "UTC",
   });
@@ -167,9 +170,8 @@ function formatSpeakerNotes(
   notes: Partial<Record<SupportedLanguage, string>>,
   languages: SupportedLanguage[],
 ): string {
-  const names: Record<SupportedLanguage, string> = { en: "ENGLISH", it: "ITALIANO" };
   return languages
-    .map((language) => `${names[language]}\n${notes[language] ?? ""}`)
+    .map((language) => `${localeName(language, language).toLocaleUpperCase(language)}\n${notes[language] ?? ""}`)
     .join("\n\n");
 }
 
@@ -237,14 +239,35 @@ function containImage(
   };
 }
 
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+const wideCharacter = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Extended_Pictographic}]/u;
+const characterWidth = (grapheme: string) => wideCharacter.test(grapheme) ? 2 : 1;
+const textWidth = (text: string) => [...graphemeSegmenter.segment(text)]
+  .reduce((width, part) => width + characterWidth(part.segment), 0);
+
 function wrapLines(text: string, maximumCharactersPerLine: number): string[] {
   const words = text.trim().replace(/\s+/g, " ").split(" ");
   const lines: string[] = [];
   let currentLine = "";
 
   for (const word of words) {
+    if (textWidth(word) > maximumCharactersPerLine) {
+      if (currentLine) { lines.push(currentLine); currentLine = ""; }
+      let width = 0;
+      for (const { segment } of graphemeSegmenter.segment(word)) {
+        const size = characterWidth(segment);
+        if (currentLine && width + size > maximumCharactersPerLine) {
+          lines.push(currentLine);
+          currentLine = "";
+          width = 0;
+        }
+        currentLine += segment;
+        width += size;
+      }
+      continue;
+    }
     const candidate = currentLine ? `${currentLine} ${word}` : word;
-    if (currentLine && candidate.length > maximumCharactersPerLine) {
+    if (currentLine && textWidth(candidate) > maximumCharactersPerLine) {
       lines.push(currentLine);
       currentLine = word;
     } else {
@@ -297,11 +320,17 @@ function titleSpeakerNotes(
   from: Date,
   to: Date,
   languages: SupportedLanguage[],
+  localization?: DeckLocalization,
 ): Partial<Record<SupportedLanguage, string>> {
   return Object.fromEntries(
     languages.map((language) => [
       language,
-      language === "it"
+      localization?.speakerNotes?.[language]
+        ? localization.speakerNotes[language].introduction
+          .replaceAll("{count}", new Intl.NumberFormat(language).format(posts.length))
+          .replaceAll("{from}", formatDate(from, "long", language))
+          .replaceAll("{to}", formatDate(to, "long", language))
+        : builtinLanguage(language) === "it"
         ? `Benvenuti al briefing sul changelog di GitHub Copilot. La presentazione copre ${posts.length} ${
             posts.length === 1 ? "aggiornamento" : "aggiornamenti"
           } pubblicati tra il ${formatDate(from, "long", language)} e il ${formatDate(to, "long", language)}.`
@@ -316,11 +345,14 @@ function sectionSpeakerNotes(
   section: Section,
   count: number,
   languages: SupportedLanguage[],
+  localization?: DeckLocalization,
 ): Partial<Record<SupportedLanguage, string>> {
   return Object.fromEntries(
     languages.map((language) => [
       language,
-      language === "it"
+      localization?.speakerNotes?.[language]
+        ? localization.speakerNotes[language].sections[section].replaceAll("{count}", new Intl.NumberFormat(language).format(count))
+        : builtinLanguage(language) === "it"
         ? `Questa sezione presenta ${count} ${
             count === 1 ? "aggiornamento" : "aggiornamenti"
           } nella categoria ${copy.it.sectionNames[section]}. Introdurre il tema prima di passare alle singole novità.`
@@ -336,9 +368,11 @@ function addFooter(
   index: number,
   article?: ArticleFooter,
   dark = false,
+  locale = article?.language ?? "en",
 ): void {
   const footerColor = dark ? palette.border : palette.muted;
   slide.addText(String(index).padStart(2, "0"), {
+    ...localeText(locale),
     x: 12.25,
     y: 7.05,
     w: 0.45,
@@ -370,6 +404,7 @@ function addFooter(
         },
       },
     ], {
+      ...localeText(locale),
       x: 0.65,
       y: 7.02,
       w: 4.8,
@@ -398,7 +433,7 @@ function addTitleSlide(
   slideNumber: number,
   options: PresentationOptions,
 ): void {
-  const labels = copy[options.slidesLanguage];
+  const labels = presentationCopy(options);
   const slide = pptx.addSlide();
   slide.background = { color: palette.ink };
   slide.addShape(pptx.ShapeType.rect, {
@@ -411,6 +446,7 @@ function addTitleSlide(
   });
   addCopilotMark(pptx, slide, 9.18, 1.72, 2.45);
   slide.addText(labels.changelog, {
+    ...localeText(options.slidesLanguage),
     x: 0.75,
     y: 0.65,
     w: 5.5,
@@ -423,6 +459,7 @@ function addTitleSlide(
     margin: 0,
   });
   slide.addText(labels.title, {
+    ...localeText(options.slidesLanguage),
     x: 0.75,
     y: 1.45,
     w: 8.8,
@@ -437,6 +474,7 @@ function addTitleSlide(
   slide.addText(
     `${formatDate(from, "medium", options.slidesLanguage)} — ${formatDate(to, "medium", options.slidesLanguage)}`,
     {
+      ...localeText(options.slidesLanguage),
       x: 0.78,
       y: 4.35,
       w: 5.5,
@@ -448,6 +486,7 @@ function addTitleSlide(
     },
   );
   slide.addText(`${posts.length}`, {
+    ...localeText(options.slidesLanguage),
     x: 10.55,
     y: 5.25,
     w: 1.35,
@@ -460,6 +499,7 @@ function addTitleSlide(
     align: "right",
   });
   slide.addText(posts.length === 1 ? labels.update : labels.updates, {
+    ...localeText(options.slidesLanguage),
     x: 10.4,
     y: 6.0,
     w: 1.5,
@@ -474,11 +514,11 @@ function addTitleSlide(
   });
   slide.addNotes(
     formatSpeakerNotes(
-      titleSpeakerNotes(posts, from, to, options.speakerNotesLanguages),
+      titleSpeakerNotes(posts, from, to, options.speakerNotesLanguages, options.localization),
       options.speakerNotesLanguages,
     ),
   );
-  addFooter(slide, slideNumber, undefined, true);
+  addFooter(slide, slideNumber, undefined, true, options.slidesLanguage);
 }
 
 function addSectionSlide(
@@ -488,7 +528,7 @@ function addSectionSlide(
   slideNumber: number,
   options: PresentationOptions,
 ): void {
-  const labels = copy[options.slidesLanguage];
+  const labels = presentationCopy(options);
   const slide = pptx.addSlide();
   slide.background = { color: palette.ink };
   slide.addShape(pptx.ShapeType.rect, {
@@ -501,6 +541,7 @@ function addSectionSlide(
   });
   addCopilotMark(pptx, slide, 10.92, 4.85, 1.72);
   slide.addText(String(count).padStart(2, "0"), {
+    ...localeText(options.slidesLanguage),
     x: 0.7,
     y: 0.55,
     w: 1,
@@ -512,6 +553,7 @@ function addSectionSlide(
     margin: 0,
   });
   slide.addText(labels.section, {
+    ...localeText(options.slidesLanguage),
     x: 0.75,
     y: 2.25,
     w: 2,
@@ -524,6 +566,7 @@ function addSectionSlide(
     margin: 0,
   });
   slide.addText(labels.sectionNames[section], {
+    ...localeText(options.slidesLanguage),
     x: 0.7,
     y: 2.7,
     w: 10.8,
@@ -536,11 +579,11 @@ function addSectionSlide(
   });
   slide.addNotes(
     formatSpeakerNotes(
-      sectionSpeakerNotes(section, count, options.speakerNotesLanguages),
+      sectionSpeakerNotes(section, count, options.speakerNotesLanguages, options.localization),
       options.speakerNotesLanguages,
     ),
   );
-  addFooter(slide, slideNumber, undefined, true);
+  addFooter(slide, slideNumber, undefined, true, options.slidesLanguage);
 }
 
 function addPostHero(
@@ -552,6 +595,8 @@ function addPostHero(
   const slide = pptx.addSlide();
   slide.background = { color: palette.ink };
   const hasImage = Boolean(post.imageDataUri);
+  const displayTitle = post.localization?.articleTitle ?? post.title;
+  const titleLength = textWidth(displayTitle);
   if (post.imageDataUri) {
     slide.addShape(pptx.ShapeType.roundRect, {
       x: 6.85,
@@ -572,7 +617,7 @@ function addPostHero(
       data: post.imageDataUri,
       ...imageBox,
       hyperlink: { url: post.url },
-      altText: post.title,
+      altText: displayTitle,
     });
     addCopilotMark(pptx, slide, 11.45, 0.65, 0.78);
   } else {
@@ -586,7 +631,8 @@ function addPostHero(
     });
     addCopilotMark(pptx, slide, 10.92, 4.95, 1.42);
   }
-  slide.addText(sectionLabel(post.section, options.slidesLanguage), {
+  slide.addText(sectionLabel(post.section, options), {
+    ...localeText(options.slidesLanguage),
     x: 0.72,
     y: 0.65,
     w: 3.3,
@@ -599,16 +645,16 @@ function addPostHero(
     margin: 0,
   });
   const heroTitleSize = hasImage
-    ? post.title.length > 110
+    ? titleLength > 110
       ? 20
-      : post.title.length > 72
+      : titleLength > 72
         ? 22
-        : post.title.length > 55
+        : titleLength > 55
           ? 24
           : 32
-    : post.title.length > 110
+    : titleLength > 110
       ? 32
-      : post.title.length > 72
+      : titleLength > 72
         ? 36
         : 52;
   const heroLineLength = hasImage
@@ -629,11 +675,12 @@ function addPostHero(
     : { x: 0.72, y: 1.3, w: 10.35, h: 4.55 };
   addWrappedText(
     slide,
-    post.title,
+    displayTitle,
     heroLineLength,
     titleBox,
     heroTitleSize / 58,
     {
+      ...localeText(options.slidesLanguage),
       fontFace: fonts.heading,
       fontSize: heroTitleSize,
       bold: true,
@@ -641,7 +688,7 @@ function addPostHero(
     },
     "middle",
   );
-  slide.addNotes(formatSpeakerNotes(post.speakerNotes, options.speakerNotesLanguages));
+  slide.addNotes(formatSpeakerNotes(post.speakerNotes, options.speakerNotesLanguages) + formatEvidence(post));
   addFooter(slide, slideNumber, articleFooter(post, options.slidesLanguage), true);
 }
 
@@ -651,7 +698,9 @@ function addPostDetails(
   slideNumber: number,
   options: PresentationOptions,
 ): void {
-  const labels = copy[options.slidesLanguage];
+  const labels = presentationCopy(options);
+  const displayTitle = post.localization?.articleTitle ?? post.title;
+  const titleLength = textWidth(displayTitle);
   const slide = pptx.addSlide();
   slide.background = { color: palette.paper };
   slide.addShape(pptx.ShapeType.rect, {
@@ -663,7 +712,8 @@ function addPostDetails(
     line: { transparency: 100 },
   });
   addCopilotMark(pptx, slide, 11.75, 0.65, 0.68);
-  slide.addText(sectionLabel(post.section, options.slidesLanguage), {
+  slide.addText(sectionLabel(post.section, options), {
+    ...localeText(options.slidesLanguage),
     x: 0.7,
     y: 0.5,
     w: 3.3,
@@ -675,16 +725,17 @@ function addPostDetails(
     charSpacing: 1.5,
     margin: 0,
   });
-  const detailsTitleSize = post.title.length > 110 ? 23 : post.title.length > 72 ? 26 : 30;
+  const detailsTitleSize = titleLength > 110 ? 23 : titleLength > 72 ? 26 : 30;
   const detailsTitleLineLength =
     detailsTitleSize >= 30 ? 68 : detailsTitleSize >= 26 ? 76 : 84;
   addWrappedText(
     slide,
-    post.title,
+    displayTitle,
     detailsTitleLineLength,
     { x: 0.7, y: 0.95, w: 10.85, h: 1.12 },
     detailsTitleSize / 58,
     {
+      ...localeText(options.slidesLanguage),
       fontFace: fonts.heading,
       fontSize: detailsTitleSize,
       bold: true,
@@ -700,6 +751,7 @@ function addPostDetails(
     { x: 0.72, y: 2.2, w: 11.85, h: 0.62 },
     summarySize / 55,
     {
+      ...localeText(options.slidesLanguage),
       fontFace: fonts.body,
       fontSize: summarySize,
       color: palette.muted,
@@ -726,6 +778,7 @@ function addPostDetails(
       line: { color: index === 0 ? palette.greenSoft : palette.border, width: 1 },
     });
     slide.addText(labels.detailLabels[key], {
+      ...localeText(options.slidesLanguage),
       x: x + 0.25,
       y: y + 0.17,
       w: textWidth,
@@ -748,6 +801,7 @@ function addPostDetails(
       { x: x + 0.25, y: y + 0.48, w: textWidth, h: 0.98 },
       detailSize / (richer ? 60 : 51),
       {
+        ...localeText(options.slidesLanguage),
         fontFace: fonts.body,
         fontSize: detailSize,
         color: palette.ink,
@@ -756,7 +810,7 @@ function addPostDetails(
       announcements || richer,
     );
   });
-  slide.addNotes(formatSpeakerNotes(post.speakerNotes, options.speakerNotesLanguages));
+  slide.addNotes(formatSpeakerNotes(post.speakerNotes, options.speakerNotesLanguages) + formatEvidence(post));
   addFooter(slide, slideNumber, articleFooter(post, options.slidesLanguage));
 }
 
@@ -812,6 +866,13 @@ export async function writePresentation(
 ): Promise<string> {
   await mkdir(outputDirectory, { recursive: true });
   const pptx = new PptxGenJS();
+  const slides = posts.find((post) => post.localization?.slides?.locale === options.slidesLanguage)?.localization?.slides;
+  const speakerNotes = Object.fromEntries(options.speakerNotesLanguages.flatMap((locale) => {
+    const translated = posts.find((post) => post.localization?.speakerNotes?.[locale])?.localization?.speakerNotes?.[locale];
+    return translated ? [[locale, translated]] : [];
+  }));
+  options = { ...options, localization: { ...(slides ? { slides } : {}), speakerNotes } };
+  pptx.rtlMode = isRtlLocale(options.slidesLanguage);
   pptx.layout = "LAYOUT_WIDE";
   pptx.author = "Copilot Changelog CLI";
   pptx.company = "GitHub";

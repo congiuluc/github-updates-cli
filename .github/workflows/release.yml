@@ -5,29 +5,61 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing vX.Y.Z or vX.Y.Z-prerelease tag to publish (blank builds only)"
+        required: false
+        type: string
 
 permissions:
   contents: write
 
 jobs:
   verify-version:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
-      version: ${{ steps.package.outputs.version }}
+      version: ${{ steps.source.outputs.version }}
+      commit: ${{ steps.source.outputs.commit }}
+      tag: ${{ steps.source.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      # Resolve the tag from the workflow revision, including when recovering an older release.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
-      - id: package
+      - id: source
+        name: Resolve release source and version
         shell: bash
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
         run: |
-          VERSION="$(node -p "require('./package.json').version")"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$VERSION" ]]; then
-            echo "Tag $GITHUB_REF_NAME does not match package version v$VERSION." >&2
-            exit 1
-          fi
+          node --input-type=module <<'NODE'
+          import { execFileSync } from "node:child_process";
+          import { appendFileSync } from "node:fs";
+
+          const tag = process.env.GITHUB_EVENT_NAME === "workflow_dispatch"
+            ? process.env.REQUESTED_TAG ?? ""
+            : process.env.GITHUB_REF_TYPE === "tag" ? process.env.GITHUB_REF_NAME ?? "" : "";
+          let version;
+          if (tag) {
+            const number = "(?:0|[1-9][0-9]*)";
+            const identifier = "(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)";
+            const match = new RegExp(`^v(${number}\\.${number}\\.${number}(?:-${identifier}(?:\\.${identifier})*)?)$`).exec(tag);
+            if (!match || match[0] !== tag) {
+              throw new Error("Expected a release tag vX.Y.Z with an optional SemVer prerelease suffix.");
+            }
+            version = match[1];
+          }
+          const commit = execFileSync("git", ["rev-parse", "--verify", tag ? `refs/tags/${tag}^{commit}` : "HEAD"], {
+            encoding: "utf8",
+          }).trim();
+          if (!tag) {
+            version = JSON.parse(execFileSync("git", ["show", `${commit}:package.json`], { encoding: "utf8" })).version;
+          }
+          appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\ncommit=${commit}\ntag=${tag}\n`);
+          NODE
 
   validate:
     needs: verify-version
@@ -35,13 +67,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.verify-version.outputs.commit }}
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
           cache: npm
+      - name: Stamp the release version without changing the tag
+        if: needs.verify-version.outputs.tag != ''
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.verify-version.outputs.version }}
+        run: npm version "$RELEASE_VERSION" --no-git-tag-version --ignore-scripts --allow-same-version
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
@@ -50,17 +90,25 @@ jobs:
     needs: verify-version
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.verify-version.outputs.commit }}
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
           cache: npm
+      - name: Stamp the release version without changing the tag
+        if: needs.verify-version.outputs.tag != ''
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.verify-version.outputs.version }}
+        run: npm version "$RELEASE_VERSION" --no-git-tag-version --ignore-scripts --allow-same-version
       - run: npm ci
       - name: Install Inno Setup
         shell: powershell
         run: choco install innosetup --yes --no-progress
       - run: npm run build:windows
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-packages
           path: |
@@ -82,14 +130,22 @@ jobs:
             os: ubuntu-24.04-arm
             deb_arch: arm64
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.verify-version.outputs.commit }}
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
           cache: npm
+      - name: Stamp the release version without changing the tag
+        if: needs.verify-version.outputs.tag != ''
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.verify-version.outputs.version }}
+        run: npm version "$RELEASE_VERSION" --no-git-tag-version --ignore-scripts --allow-same-version
       - run: npm ci
       - run: bash ./packaging/build-linux.sh "${{ matrix.arch }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux-${{ matrix.arch }}-packages
           path: |
@@ -109,14 +165,22 @@ jobs:
           - arch: arm64
             os: macos-15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.verify-version.outputs.commit }}
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
           cache: npm
+      - name: Stamp the release version without changing the tag
+        if: needs.verify-version.outputs.tag != ''
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.verify-version.outputs.version }}
+        run: npm version "$RELEASE_VERSION" --no-git-tag-version --ignore-scripts --allow-same-version
       - run: npm ci
       - run: bash ./packaging/build-macos.sh "${{ matrix.arch }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos-${{ matrix.arch }}-packages
           path: |
@@ -125,11 +189,11 @@ jobs:
           if-no-files-found: error
 
   publish:
-    if: github.ref_type == 'tag'
+    if: needs.verify-version.outputs.tag != ''
     needs: [verify-version, validate, windows, linux, macos]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: release-assets
           merge-multiple: true
@@ -139,10 +203,11 @@ jobs:
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.verify-version.outputs.tag }}
         working-directory: release-assets
-        run: >-
-          gh release create "${GITHUB_REF_NAME}" ./*
-          --repo "${GITHUB_REPOSITORY}"
-          --verify-tag
-          --generate-notes
-          --title "Copilot Changelog CLI ${GITHUB_REF_NAME}"
+        run: |
+          args=(--verify-tag --generate-notes --title "Copilot Changelog CLI ${RELEASE_TAG}")
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            args+=(--prerelease)
+          fi
+          gh release create "$RELEASE_TAG" ./* --repo "$GITHUB_REPOSITORY" "${args[@]}"

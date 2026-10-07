@@ -5,7 +5,7 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, posix, win32 } from "node:path";
 
-const repository = "congiuluc/GitHub-Updates-CLI";
+const repository = "congiuluc/github-updates-cli";
 const packageName = "copilot-changelog-cli";
 
 interface ReleaseAsset {

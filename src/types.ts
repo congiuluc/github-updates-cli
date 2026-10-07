@@ -1,3 +1,6 @@
+import type { ClaimEvidence } from "./generation.js";
+import type { DeckLocalization } from "./locales.js";
+
 export const sections = [
   "Models",
   "Enterprise Admins",
@@ -7,7 +10,8 @@ export const sections = [
 ] as const;
 
 export type Section = (typeof sections)[number];
-export type SupportedLanguage = "en" | "it";
+/** A canonical BCP 47 tag. Validate untrusted values with normalizeLocale before use. */
+export type SupportedLanguage = string;
 export type SlideDetailKey =
   | "modelName"
   | "availability"
@@ -51,12 +55,18 @@ export interface ChangelogPost {
   links: SourceLink[];
 }
 
-export interface EnrichedPost extends ChangelogPost {
+/** Content accepted by the slide validator, independent of its source and images. */
+export interface GeneratedContent {
   section: Section;
   summary: string;
   notes: string[];
   details: Partial<Record<SlideDetailKey, string>>;
   speakerNotes: Partial<Record<SupportedLanguage, string>>;
+  evidence?: ClaimEvidence[];
+  localization?: DeckLocalization;
+}
+
+export interface EnrichedPost extends ChangelogPost, GeneratedContent {
   imageDataUri?: string;
 }
 

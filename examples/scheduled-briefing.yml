@@ -1,0 +1,60 @@
+# Copy to .github/workflows/ only when you intend to enable this schedule.
+name: Weekly briefing
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 7 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: weekly-briefing-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  briefing:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Restore briefing history and accepted content
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            output/.briefing-state
+            output/.content-cache
+            output/.*.checkpoint.json
+          key: briefing-state-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: briefing-state-${{ github.ref_name }}-
+      - name: Generate new articles
+        env:
+          GH_TOKEN: ${{ secrets.COPILOT_TOKEN }}
+          COPILOT_CHANGELOG_SKIP_UPDATE_CHECK: "1"
+        run: node dist/cli.js --config examples/profiles.json --profile team --since-last-run --resume --export-json output/latest.json
+      - name: Preserve progress even after a budget pause
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            output/.briefing-state
+            output/.content-cache
+            output/.*.checkpoint.json
+          key: briefing-state-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Save briefing outputs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: briefing-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            output/*.pptx
+            output/*.html
+            output/*.json
+          if-no-files-found: ignore
+          retention-days: 14

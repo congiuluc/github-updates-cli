@@ -25,6 +25,21 @@ const post: EnrichedPost = {
 };
 
 describe("renderWebsite", () => {
+  it("marks right-to-left article content with its locale and direction", () => {
+    const html = renderWebsite([{ ...post, summary: "ملخص التحديث" }], new Date("2026-08-01"), new Date("2026-08-31"), "ar");
+    expect(html).toContain('lang="ar" dir="rtl"');
+    expect(html).toContain("ملخص التحديث");
+  });
+
+  it("includes escaped source quotations in an expandable review panel", () => {
+    const html = renderWebsite([{ ...post, evidence: [{
+      field: "summary", quote: "Use <preview> & verify eligibility.", url: post.url,
+    }] }], new Date("2026-08-01"), new Date("2026-08-31"));
+    expect(html).toContain('<details class="evidence"><summary>Source evidence</summary>');
+    expect(html).toContain("Use &lt;preview&gt; &amp; verify eligibility.");
+    expect(html).toContain("not an automated factual audit");
+  });
+
   it("creates a self-contained, sectioned and searchable page", () => {
     const html = renderWebsite(
       [post],

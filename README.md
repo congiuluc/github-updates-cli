@@ -11,16 +11,16 @@
 </p>
 
 <p align="center">
-  <a href="https://congiuluc.github.io/GitHub-Updates-CLI/"><strong>Documentation</strong></a> ·
-  <a href="https://congiuluc.github.io/GitHub-Updates-CLI/#usage">Quick start</a> ·
-  <a href="https://github.com/congiuluc/GitHub-Updates-CLI/releases">Releases</a> ·
-  <a href="https://github.com/congiuluc/GitHub-Updates-CLI/issues">Report an issue</a>
+  <a href="https://congiuluc.github.io/github-updates-cli/"><strong>Documentation</strong></a> ·
+  <a href="https://congiuluc.github.io/github-updates-cli/#usage">Quick start</a> ·
+  <a href="https://github.com/congiuluc/github-updates-cli/releases">Releases</a> ·
+  <a href="https://github.com/congiuluc/github-updates-cli/issues">Report an issue</a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/congiuluc/GitHub-Updates-CLI/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/congiuluc/GitHub-Updates-CLI/actions/workflows/ci.yml/badge.svg?branch=main"></a>
-  <a href="https://congiuluc.github.io/GitHub-Updates-CLI/"><img alt="Documentation deployment" src="https://github.com/congiuluc/GitHub-Updates-CLI/actions/workflows/pages.yml/badge.svg"></a>
-  <a href="https://congiuluc.github.io/GitHub-Updates-CLI/#install"><img alt="Node.js 24 LTS, minimum 24.21.0" src="https://img.shields.io/badge/Node.js-24.21.0%2B%20LTS-6930c3?logo=node.js"></a>
+  <a href="https://github.com/congiuluc/github-updates-cli/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/congiuluc/github-updates-cli/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <a href="https://congiuluc.github.io/github-updates-cli/"><img alt="Documentation deployment" src="https://github.com/congiuluc/github-updates-cli/actions/workflows/pages.yml/badge.svg"></a>
+  <a href="https://congiuluc.github.io/github-updates-cli/#install"><img alt="Node.js 24 LTS, minimum 24.21.0" src="https://img.shields.io/badge/Node.js-24.21.0%2B%20LTS-6930c3?logo=node.js"></a>
   <img alt="Windows, Linux, macOS" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS-625c71">
 </p>
 
@@ -30,11 +30,9 @@
 
 | Collect | Present | Recover |
 | --- | --- | --- |
-| Collect the Copilot changelog for your date range; optionally add RSS feeds and GitHub Blog AI & ML articles. | Get section-aware slides, source links, and English or Italian speaker notes. | Keep accepted work and retry omitted slides with `--resume`. |
+| Collect the Copilot changelog, optional RSS/Atom feeds and AI & ML articles; preview and filter before spending. | Get audience-aware slides, source quotations, editable JSON, and locale-selected presenter notes. | Reuse accepted content, cap credits, and resume or schedule incremental briefings. |
 
-Copilot receives validation errors to correct rejected content instead of mechanically trimming facts. If final content review still fails, the CLI warns, skips that article, and continues.
-
-Transient request retries also receive the latest error, original task, and any outstanding validation problems. Timeouts are not retried on a potentially busy session.
+Copilot receives validation errors to correct rejected content instead of mechanically trimming facts. If final review fails, the CLI warns, skips that article, and continues. Transient retries receive the latest error, original task and outstanding validation problems; timeouts are not retried on a potentially busy session.
 
 ## Get started
 
@@ -49,37 +47,49 @@ npm install --global .
 copilot-changelog --from 2026-08-01 --to 2026-08-31
 ```
 
-Prefer a packaged install? See [platform downloads and authentication](https://congiuluc.github.io/GitHub-Updates-CLI/#install). This README describes the current source; published releases may lag behind. Check `copilot-changelog -h` for installed options, or build from source to use newer features. Publishing the docs does not update installed CLI packages.
+Prefer a packaged install? See [platform downloads and authentication](https://congiuluc.github.io/github-updates-cli/#install). This README describes the current source; published releases may lag behind. Check `copilot-changelog --help` for installed options, or build from source to use newer features. Publishing the docs does not update installed CLI packages.
 
 ### Make it yours
 
 ```shell
-# Italian slides, bilingual notes, and an offline website
-copilot-changelog -f 2026-08-01 -t 2026-08-31 -s it -n en,it -w
+# Canadian French slides, multilingual notes, and an offline website
+copilot-changelog --from 2026-08-01 --to 2026-08-31 --slides-language fr-CA --speaker-notes-languages fr-CA,ja,ar --website
 
 # Retry missing slides without regenerating accepted content
-copilot-changelog -f 2026-08-01 -t 2026-08-31 -R
+copilot-changelog --from 2026-08-01 --to 2026-08-31 --resume
 
 # Add one or more RSS feeds alongside the changelog (URLs or local XML files)
-copilot-changelog -r https://example.com/news.xml https://example.org/releases.xml
+copilot-changelog --rss https://example.com/news.xml https://example.org/releases.xml
 
 # Opt into GitHub Blog AI & ML articles (disabled by default)
-copilot-changelog --include-ai-ml  # short form: -a
+copilot-changelog --include-ai-ml
 ```
 
-All options have **case-sensitive short aliases**; long forms remain valid and can be mixed with short forms. `-r` adds RSS; `-R` resumes; `-S` restarts. `-a` adds the AI & ML blog; `-A` disables AI enrichment. `-f` selects the start date; `-F` replaces the base feed. See the [complete short/long option reference](https://congiuluc.github.io/GitHub-Updates-CLI/#cli-reference).
+Examples use long options for clarity; **case-sensitive short aliases** remain available in the [complete option reference](https://congiuluc.github.io/github-updates-cli/#cli-reference).
 
-`--rss` also accepts repeated occurrences. Added feeds include every article in the date range, not only Copilot mentions. All sources are merged, URL-deduplicated, and sorted newest-first before the global `--limit`. Selected RSS entries must contain readable text in `content:encoded` or `description`. `--feed` replaces the base changelog with a custom feed; `--rss` and `--include-ai-ml` can still add to it.
+`--rss` accepts RSS and Atom, including repeated occurrences. `--include` / `--exclude` filter titles before the global `--limit`; otherwise all in-range articles are eligible. `--full-articles` fetches linked pages instead of embedded feed text. `--feed` replaces the base changelog; `--rss` and `--include-ai-ml` can still add to it.
 
-When resuming a customized run, keep its original language, model, and source options, including `--rss` and `--include-ai-ml`.
+Languages accept canonical BCP 47 locale tags, such as `de`, `pt-BR`, `zh-Hant` and `ar`, not a fixed language list. AI also localizes slide headings and introductory notes; translation quality depends on the model. When resuming, keep the original locale, model and source options. `--no-ai` does not translate source text and uses English template fallbacks where built-in translations are unavailable.
 
 Interactive terminals show an in-place progress bar and a status row per concurrent worker (`--concurrency 1` through `8`). Source preparation updates in place too. Redirected output, `TERM=dumb`, and `--verbose` keep plain scrolling logs; warnings and errors remain visible.
 
-AI runs print reported AI credits at the end, including failed attempts and reviewer calls. `--resume` shows cumulative usage plus the current execution's usage. Usage is saved to the checkpoint as requests run and included in the trace. Older checkpoints, missing billing events, and interrupted requests are marked **incomplete** or **unavailable**, never assumed free. `--restart` starts a new total; completed runs retain their totals in the trace.
+AI runs report cumulative credits across resume. `--max-credits` stops new requests at a soft limit; active calls may overshoot. Missing billing data pauses budgeted runs rather than assuming calls are free. Budget pauses retain the checkpoint and exit with code 2. Accepted content is cached by source and generation settings; `--no-cache` disables reuse and `--restart` requests new content.
+
+### Repeatable briefings
+
+```shell
+copilot-changelog --config examples/profiles.json --profile team --dry-run
+copilot-changelog --config examples/profiles.json --profile executive --max-credits 5 --review-only --export-json review.json
+copilot-changelog --import-json review.json --website
+copilot-changelog --import-json review.json --regenerate https://example.com/article --regenerate-field summary --export-json revised.json
+copilot-changelog --config examples/profiles.json --profile team --since-last-run --resume
+```
+
+Start with the [sample profiles](examples/profiles.json). Profiles, preview, budgets, editable content, evidence and targeted regeneration are explained in the [workflow guide](https://congiuluc.github.io/github-updates-cli/#review-content). [Scheduling templates](https://congiuluc.github.io/github-updates-cli/#automation) are opt-in: nothing registers a task or starts a schedule automatically. Replace the regeneration URL with one listed in your exported JSON.
 
 Files are written to `output/`: a `.pptx` deck, a `.trace.jsonl` log, and optional `.html` digest. **Review trace logs before sharing:** they contain prompts and generated text.
 
-Use `copilot-changelog -V` for the installed version, `copilot-changelog update -k` to check releases without installing, and `copilot-changelog update` to install an update.
+Use `copilot-changelog --version` for the installed version, `copilot-changelog update --check` to check releases without installing, and `copilot-changelog update` to install an update. Release tags supply the version stamped into packaged manifests and lockfiles; existing tags can be rebuilt through the Release workflow's `tag` input.
 
 ## Explore the documentation
 
@@ -87,10 +97,10 @@ The online guide shows one section at a time, selected from the sidebar or searc
 
 | Start here | Go deeper |
 | --- | --- |
-| [Installation](https://congiuluc.github.io/GitHub-Updates-CLI/#install) | [Every CLI option](https://congiuluc.github.io/GitHub-Updates-CLI/#cli-reference) |
-| [Quick start](https://congiuluc.github.io/GitHub-Updates-CLI/#usage) | [AI review and corrections](https://congiuluc.github.io/GitHub-Updates-CLI/#review) |
-| [Presentation design](https://congiuluc.github.io/GitHub-Updates-CLI/#presentation) | [Resume and troubleshooting](https://congiuluc.github.io/GitHub-Updates-CLI/#resume) |
-| [Development](https://congiuluc.github.io/GitHub-Updates-CLI/#development) | [Packaging and releases](https://congiuluc.github.io/GitHub-Updates-CLI/#packaging) |
+| [Installation](https://congiuluc.github.io/github-updates-cli/#install) | [Every CLI option](https://congiuluc.github.io/github-updates-cli/#cli-reference) |
+| [Quick start](https://congiuluc.github.io/github-updates-cli/#usage) | [AI review and corrections](https://congiuluc.github.io/github-updates-cli/#review) |
+| [Presentation design](https://congiuluc.github.io/github-updates-cli/#presentation) | [Resume and troubleshooting](https://congiuluc.github.io/github-updates-cli/#resume) |
+| [Development](https://congiuluc.github.io/github-updates-cli/#development) | [Packaging and releases](https://congiuluc.github.io/github-updates-cli/#packaging) |
 
 ## Contribute
 
@@ -100,9 +110,9 @@ npm test
 npm run build
 ```
 
-The CLI lives in [src/](src/), platform scripts in [packaging/](packaging/), and the complete static documentation in [docs/](docs/).
+See the [maintainer guide](CONTRIBUTING.md) for architecture, state contracts and testing. The CLI lives in [src/](src/), workflow templates in [examples/](examples/), platform scripts in [packaging/](packaging/), and the complete static documentation in [docs/](docs/).
 
-**Update the published docs:** push changes under `docs/` to `main`, or run [Deploy documentation](.github/workflows/pages.yml) manually. Preview [docs/index.html](docs/index.html) locally first. For a fork or a new site, follow the [publishing checklist](https://congiuluc.github.io/GitHub-Updates-CLI/#github-pages).
+**Update the published docs:** push changes under `docs/` to `main`, or run [Deploy documentation](.github/workflows/pages.yml) manually. Preview [docs/index.html](docs/index.html) locally first. For a fork or a new site, follow the [publishing checklist](https://congiuluc.github.io/github-updates-cli/#github-pages).
 
 ---
 

@@ -23,13 +23,13 @@ test("documentation preserves unique and working navigation anchors", () => {
 });
 
 test("documentation assets resolve under a project Pages subpath", async () => {
-  const base = new URL("https://example.github.io/GitHub-Updates-CLI/");
+  const base = new URL("https://example.github.io/github-updates-cli/");
   const assets = $("img[src], script[src], link[href]").toArray().map((element) =>
     $(element).attr("src") ?? $(element).attr("href")!);
   for (const asset of assets) {
     const url = new URL(asset, base);
     expect(url.origin).toBe(base.origin);
-    expect(url.pathname).toMatch(/^\/GitHub-Updates-CLI\//);
+    expect(url.pathname).toMatch(/^\/github-updates-cli\//);
     const path = resolve(docsRoot, decodeURIComponent(url.pathname.slice(base.pathname.length)));
     const child = relative(docsRoot, path);
     expect(isAbsolute(child) || child.startsWith("..")).toBe(false);
@@ -44,7 +44,7 @@ test("all CLI options are documented in the complete guide", async () => {
   expect(options.length).toBeGreaterThanOrEqual(16);
   const reference = $("#cli-reference").text();
   for (const option of new Set(options)) expect(reference, `Missing ${option}`).toContain(option);
-  for (const id of ["sources", "review", "outputs", "resume", "timeouts", "updates",
+  for (const id of ["sources", "profiles-preview", "review", "review-content", "automation", "outputs", "resume", "timeouts", "updates",
     "troubleshooting", "development", "packaging", "github-pages", "security"]) {
     expect($(`#${id}`).text().trim().length).toBeGreaterThan(100);
   }
@@ -60,6 +60,14 @@ test("source documentation makes the blog opt-in and distinguishes additive RSS 
   expect(readme).toContain("copilot-changelog --include-ai-ml");
 });
 
+test("extended workflow documentation explains safety and persistence boundaries", () => {
+  expect($("#profiles-preview").text()).toContain("Arrays supplied on the CLI replace profile arrays");
+  expect($("#profiles-preview").text()).toContain("downloads no article pages");
+  expect($("#review-content").text()).toContain("not whether each claim logically follows from the quote");
+  expect($("#outputs").text()).toContain("exits with code 2");
+  expect($("#automation").text()).toContain("GitHub may evict it");
+  expect($("#automation").text()).toContain("No command in this project registers the task automatically");
+});
 test("every declared option has a unique short alias documented with its long name", async () => {
   const cli = await readFile(resolve(root, "src", "cli.ts"), "utf8");
   const flags = [...cli.matchAll(/(?:\.option\(|new Option\()\s*["']([^"']+)/g)].map((match) => match[1]);
@@ -75,7 +83,19 @@ test("every declared option has a unique short alias documented with its long na
   }
   expect(new Set(shortOptions).size).toBe(shortOptions.length);
   expect(readme).toContain("case-sensitive");
-  expect(readme).toContain("-f 2026-08-01 -t 2026-08-31");
+  expect(readme).toContain("--from 2026-08-01 --to 2026-08-31");
+});
+
+test("documentation command examples use long options and describe unrestricted locale tags", () => {
+  const samples = $("code").toArray().map((element) => $(element).text())
+    .filter((text) => text.includes("copilot-changelog ") || text.includes("npm run dev --"));
+  for (const sample of samples) expect(sample).not.toMatch(/(?:^|\s)-[A-Za-z](?:\s|$)/m);
+  for (const line of readme.split("\n").filter((text) => text.startsWith("copilot-changelog "))) {
+    expect(line).not.toMatch(/(?:^|\s)-[A-Za-z](?:\s|$)/);
+  }
+  expect($("#usage").text()).toContain("BCP 47");
+  expect($("#usage").text()).toContain("not an English/Italian allowlist");
+  expect($("#cli-reference").text()).toContain("fr-CA");
 });
 test("documentation has accessible fallbacks without JavaScript", () => {
   expect($("h1")).toHaveLength(1);
@@ -111,7 +131,7 @@ test("printing includes sections hidden by topic navigation", async () => {
 
 test("the concise README links to documentation topics that exist", async () => {
   expect(readme.trim().split("\n").length).toBeLessThanOrEqual(120);
-  const topicLinks = [...readme.matchAll(/https:\/\/congiuluc\.github\.io\/GitHub-Updates-CLI\/#([a-z-]+)/g)];
+  const topicLinks = [...readme.matchAll(/https:\/\/congiuluc\.github\.io\/github-updates-cli\/#([a-z-]+)/g)];
   expect(topicLinks.length).toBeGreaterThan(5);
   for (const [, id] of topicLinks) expect($(`#${id}`)).toHaveLength(1);
   const markup = load(readme);
@@ -131,4 +151,18 @@ test("GitHub Pages deploys the full static documentation directory", async () =>
   const css = await readFile(resolve(docsRoot, "assets", "docs.css"), "utf8");
   expect(css).toContain("prefers-reduced-motion");
   expect(css).toContain(":focus-visible");
+});
+
+test("the maintainer guide links existing modules and describes the execution contracts", async () => {
+  const guide = await readFile(resolve(root, "CONTRIBUTING.md"), "utf8");
+  expect(readme).toContain("(CONTRIBUTING.md)");
+  expect($("#development").text()).toContain("maintainer guide");
+  for (const [, target] of guide.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)) {
+    if (/^https?:/.test(target)) continue;
+    await expect(access(resolve(root, target))).resolves.toBeUndefined();
+  }
+  for (const contract of ["whole-invocation snapshots", "TMPDIR", "before the global",
+    "not the package/release version", "Preserve all other accepted fields"]) {
+    expect(guide).toContain(contract);
+  }
 });

@@ -4,6 +4,8 @@ import { hostname } from "node:os";
 import { dirname } from "node:path";
 import { sections, sectionDetailKeys, type Section, type EnrichedPost, type SupportedLanguage } from "./types.js";
 import { isAiUsage, type AiUsage } from "./usage.js";
+import { isAudience, type Audience } from "./generation.js";
+import { isCanonicalLocale, localizationIssues, parseLocalization, LocalizationValidationError } from "./locales.js";
 
 export interface CheckpointConfig {
   contentVersion: number;
@@ -12,6 +14,9 @@ export interface CheckpointConfig {
   useAi: boolean;
   slidesLanguage: SupportedLanguage;
   speakerNotesLanguages: SupportedLanguage[];
+  audience?: Audience;
+  evidence?: boolean;
+  regeneration?: string;
 }
 
 export interface CheckpointState {
@@ -23,6 +28,10 @@ export interface CheckpointState {
 
 export type ExistingRunAction = "resume" | "restart";
 
+/**
+ * Hold an exclusive per-run lock until all work and cleanup finish.
+ * Never reclaim a stale lock automatically: another host may own it.
+ */
 export async function withRunLock<T>(path: string, operation: () => Promise<T>): Promise<T> {
   await mkdir(dirname(path), { recursive: true });
   const owner = JSON.stringify({ pid: process.pid, hostname: hostname(), token: randomUUID() });
@@ -94,7 +103,7 @@ function isStringArray(value: unknown): value is string[] {
 }
 
 function isLanguage(value: unknown): value is SupportedLanguage {
-  return value === "en" || value === "it";
+  return isCanonicalLocale(value);
 }
 
 function isSection(value: unknown): value is Section {
@@ -109,6 +118,9 @@ function isConfig(value: unknown): value is CheckpointConfig {
     new Set(value.postUrls).size === value.postUrls.length &&
     isNonEmptyString(value.model) &&
     typeof value.useAi === "boolean" &&
+    (value.audience === undefined || isAudience(value.audience)) &&
+    (value.evidence === undefined || typeof value.evidence === "boolean") &&
+    (value.regeneration === undefined || typeof value.regeneration === "string") &&
     isLanguage(value.slidesLanguage) &&
     Array.isArray(value.speakerNotesLanguages) &&
     value.speakerNotesLanguages.length > 0 &&
@@ -116,8 +128,20 @@ function isConfig(value: unknown): value is CheckpointConfig {
     new Set(value.speakerNotesLanguages).size === value.speakerNotesLanguages.length;
 }
 
-function isCompletedPost(value: unknown, config: CheckpointConfig): value is EnrichedPost {
+/** Structural persistence guard; AI formatting and source-evidence checks live in content-store. */
+export function isCompletedPost(
+  value: unknown, config: Pick<CheckpointConfig, "speakerNotesLanguages"> & Partial<Pick<CheckpointConfig, "slidesLanguage" | "useAi">>,
+): value is EnrichedPost {
   if (!isRecord(value) || !isSection(value.section)) return false;
+  if (value.localization !== undefined || config.useAi) {
+    try {
+      const localization = parseLocalization(value.localization);
+      if (localizationIssues(localization, config.slidesLanguage ?? "en", config.speakerNotesLanguages, config.useAi).length) return false;
+    } catch (error) {
+      if (!(error instanceof LocalizationValidationError)) throw error;
+      return false;
+    }
+  }
   const details = value.details;
   const speakerNotes = value.speakerNotes;
   return isNonEmptyString(value.title) &&
@@ -139,7 +163,9 @@ function isCompletedPost(value: unknown, config: CheckpointConfig): value is Enr
     isRecord(speakerNotes) &&
     Object.values(speakerNotes).every((notes) => typeof notes === "string") &&
     config.speakerNotesLanguages.every((language) => isNonEmptyString(speakerNotes[language])) &&
-    (value.imageDataUri === undefined || isNonEmptyString(value.imageDataUri));
+    (value.imageDataUri === undefined || isNonEmptyString(value.imageDataUri)) &&
+    (value.evidence === undefined || (Array.isArray(value.evidence) && value.evidence.every((entry: unknown) =>
+      isRecord(entry) && isNonEmptyString(entry.field) && isNonEmptyString(entry.quote) && isNonEmptyString(entry.url))));
 }
 
 function isCheckpoint(value: unknown): value is CheckpointState {
@@ -168,6 +194,9 @@ export function checkpointMatches(
     previous.contentVersion === config.contentVersion &&
     previous.model === config.model &&
     previous.useAi === config.useAi &&
+    (previous.audience ?? "standard") === (config.audience ?? "standard") &&
+    (previous.evidence ?? false) === (config.evidence ?? false) &&
+    previous.regeneration === config.regeneration &&
     previous.slidesLanguage === config.slidesLanguage &&
     previous.postUrls.length === config.postUrls.length &&
     previous.postUrls.every((url, index) => url === config.postUrls[index]) &&

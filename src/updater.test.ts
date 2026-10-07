@@ -29,7 +29,7 @@ afterEach(() => {
 
 const newerRelease = () => new Response(JSON.stringify({
   tag_name: "v1.1.0",
-  html_url: "https://github.com/congiuluc/GitHub-Updates-CLI/releases/tag/v1.1.0",
+  html_url: "https://github.com/congiuluc/github-updates-cli/releases/tag/v1.1.0",
   assets: [],
 }));
 
@@ -254,7 +254,7 @@ test("checks for a newer release without installing it", async () => {
     new Response(
       JSON.stringify({
         tag_name: "v1.1.0",
-        html_url: "https://github.com/congiuluc/GitHub-Updates-CLI/releases/tag/v1.1.0",
+        html_url: "https://github.com/congiuluc/github-updates-cli/releases/tag/v1.1.0",
         assets: [],
       }),
       { status: 200 },

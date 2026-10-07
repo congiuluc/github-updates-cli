@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "defaults": {
+    "output": "../output",
+    "model": "auto",
+    "slidesLanguage": "en",
+    "speakerNotesLanguages": "en",
+    "concurrency": 1,
+    "requestTimeout": 180,
+    "maxCredits": "5",
+    "cache": true,
+    "website": true,
+    "includeAiMl": false
+  },
+  "profiles": {
+    "team": {
+      "audience": "developer"
+    },
+    "executive": {
+      "audience": "executive",
+      "evidence": true
+    },
+    "admin": {
+      "audience": "administrator",
+      "include": ["enterprise", "policy", "admin"]
+    }
+  }
+}
