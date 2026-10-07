@@ -16,6 +16,8 @@ import {
 } from "./checkpoint.js";
 import { outputFileStem } from "./output-naming.js";
 import { createTraceLogger } from "./trace.js";
+import { createProgressDisplay } from "./progress.js";
+import { addAiUsage, emptyAiUsage, formatAiUsage } from "./usage.js";
 import type { DateRange, EnrichedPost, SupportedLanguage } from "./types.js";
 import { updateCli } from "./updater.js";
 
@@ -26,6 +28,8 @@ interface CliOptions {
   model: string;
   limit?: string;
   feed?: string;
+  rss: string[];
+  includeAiMl: boolean;
   ai: boolean;
   website: boolean;
   resume: boolean;
@@ -138,6 +142,8 @@ async function run(options: CliOptions): Promise<void> {
     model: options.model,
     useAi: options.ai,
     feed: options.feed ?? null,
+    rss: options.rss,
+    includeAiMl: options.includeAiMl,
     limit: limit ?? null,
     concurrency: options.concurrency,
     requestTimeoutMs,
@@ -145,48 +151,33 @@ async function run(options: CliOptions): Promise<void> {
     speakerNotesLanguages: options.speakerNotesLanguages,
   });
   process.stderr.write(`Trace log: ${tracePath}\n`);
+  const progressDisplay = createProgressDisplay({ enabled: !options.verbose });
+  let currentUsage = emptyAiUsage();
+  let previousUsage = emptyAiUsage();
+  let resumed = false;
 
   try {
-  const { collectChangelog, parseChangelogFeed } = await import("./collector.js");
-  let sourcePreparationAnnounced = false;
-  let posts;
-  if (options.feed && !/^https?:\/\//i.test(options.feed)) {
-    const feedPath = resolve(options.feed);
-    let feedXml: string;
-    try {
-      feedXml = await readFile(feedPath, "utf8");
-    } catch (error) {
-      throw new Error(
-        `Could not read the local feed file at ${feedPath}: ${error instanceof Error ? error.message : String(error)}. Verify the path and file permissions, then retry.`,
-        { cause: error },
-      );
-    }
-    try {
-      posts = parseChangelogFeed(feedXml, range, limit);
-      await trace.log("local_feed_loaded", {
-        path: feedPath,
-        articles: posts.length,
-      });
-    } catch (error) {
-      throw new Error(
-        `Could not parse the local feed file at ${feedPath}: ${error instanceof Error ? error.message : String(error)}. Provide a valid GitHub changelog RSS/XML file.`,
-        { cause: error },
-      );
-    }
-  } else {
-    posts = await collectChangelog(range, options.feed, {
+  const { collectChangelog } = await import("./collector.js");
+  const posts = await collectChangelog(range, options.feed, {
       limit,
+      additionalFeeds: options.rss,
+      includeAiMl: options.includeAiMl,
+      onFeedLoaded: async ({ source, articles, local }) => {
+        await trace.log(local ? "local_feed_loaded" : "rss_feed_loaded", {
+          ...(local ? { path: source } : { url: source }), articles,
+        });
+      },
       onArticlesDiscovered: async (total) => {
-        sourcePreparationAnnounced = true;
         process.stderr.write(
-          `Found ${total} changelog entries. Preparing local source copies before Copilot enrichment.\n`,
+          `Found ${total} articles across the selected sources. Preparing local source copies before Copilot enrichment.\n`,
         );
         await trace.log("source_articles_discovered", { total });
+        progressDisplay.start("Sources", total);
       },
       onArticleProgress: async ({ completed, total, title, succeeded }) => {
-        process.stderr.write(
-          `${succeeded ? "Prepared" : "Failed"} source ${completed}/${total}: ${title}\n`,
-        );
+        const message = `${succeeded ? "Prepared" : "Failed"} source ${completed}/${total}: ${title}`;
+        if (progressDisplay.active) progressDisplay.update(completed, message);
+        else process.stderr.write(`${message}\n`);
         await trace.log("source_article_prepared", {
           completed,
           total,
@@ -195,26 +186,21 @@ async function run(options: CliOptions): Promise<void> {
         });
       },
     });
-  }
-  if (limit) posts = posts.slice(0, limit);
+  progressDisplay.stop();
   if (!posts.length) {
     throw new Error(
-      `No GitHub Copilot changelog entries were found from ${options.from} through ${options.to}. Expand the date range or verify the --feed source.`,
+      `No articles were found in the selected sources from ${options.from} through ${options.to}. Expand the date range, verify --feed / --rss, or enable --include-ai-ml.`,
     );
   }
 
-  if (sourcePreparationAnnounced) {
-    process.stderr.write(
-      `All ${posts.length} selected source articles are available locally. Starting content processing.\n`,
-    );
-  } else {
-    process.stderr.write(
-      `Found ${posts.length} changelog entries in the feed. Their content is ready for processing.\n`,
-    );
-  }
+  process.stderr.write(
+    `All ${posts.length} selected source articles are available locally. Starting content processing.\n`,
+  );
   await trace.log("source_preparation_completed", {
     articles: posts.length,
     source: options.feed ?? "GitHub Copilot changelog",
+    rss: options.rss,
+    includeAiMl: options.includeAiMl,
   });
   const checkpointPath = join(
     output,
@@ -277,6 +263,9 @@ async function run(options: CliOptions): Promise<void> {
     config: checkpointConfig,
     completed: [],
   };
+  resumed = Boolean(checkpoint);
+  previousUsage = state.usage ?? { ...emptyAiUsage(), historyIncomplete: resumed && options.ai };
+  state.usage = previousUsage;
   await saveCheckpoint(checkpointPath, state);
   const completedByUrl = new Map(state.completed.map((post) => [post.url, post]));
   const pendingPosts = posts.filter((post) => !completedByUrl.has(post.url));
@@ -287,6 +276,12 @@ async function run(options: CliOptions): Promise<void> {
       posts.map((post, index) => [post.url, index + 1]),
     );
     let checkpointWrite = Promise.resolve();
+    const persistState = () => {
+      checkpointWrite = checkpointWrite.then(() => saveCheckpoint(checkpointPath, state));
+      return checkpointWrite;
+    };
+    progressDisplay.start("Enriching", posts.length, Math.min(concurrency, pendingPosts.length), state.completed.length);
+    try {
     await enrichWithCopilot(pendingPosts, {
       model: options.model,
       useAi: options.ai,
@@ -299,10 +294,17 @@ async function run(options: CliOptions): Promise<void> {
       progressForPost: (post) => articlePositions.get(post.url) ?? 0,
       trace: ({ event, ...data }) => trace.log(event, data),
       traceLogPath: tracePath,
+      onProgress: progressDisplay.active ? (event) => progressDisplay.event(event) : undefined,
+      onMessage: (message) => progressDisplay.log(message),
+      onUsage: async (usage) => {
+        currentUsage = usage;
+        state.usage = addAiUsage(previousUsage, currentUsage);
+        await persistState();
+        await trace.log("copilot_usage_updated", { currentUsage, totalUsage: state.usage });
+      },
       onPostEnriched: async (post) => {
         state.completed.push(post);
-        checkpointWrite = checkpointWrite.then(() => saveCheckpoint(checkpointPath, state));
-        await checkpointWrite;
+        await persistState();
         await trace.log("checkpoint_article_saved", {
           path: checkpointPath,
           title: post.title,
@@ -311,6 +313,9 @@ async function run(options: CliOptions): Promise<void> {
         });
       },
     });
+    } finally {
+      progressDisplay.stop();
+    }
   }
   const allCompletedByUrl = new Map(state.completed.map((post) => [post.url, post]));
   const enriched = posts
@@ -354,12 +359,16 @@ async function run(options: CliOptions): Promise<void> {
     presentationPath,
     websiteGenerated: options.website,
     checkpointRetained: omittedPosts.length > 0,
+    currentUsage,
+    totalUsage: addAiUsage(previousUsage, currentUsage),
   });
   process.stdout.write(`Trace log: ${tracePath}\n`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     try {
-      await trace.log("run_failed", { error: message });
+      await trace.log("run_failed", {
+        error: message, currentUsage, totalUsage: addAiUsage(previousUsage, currentUsage),
+      });
     } catch (traceError) {
       throw new Error(
         `${message}\nTrace logging also failed at ${tracePath}: ${traceError instanceof Error ? traceError.message : String(traceError)}`,
@@ -368,6 +377,12 @@ async function run(options: CliOptions): Promise<void> {
     }
     if (message.includes(`Trace log: ${tracePath}`)) throw error;
     throw new Error(`${message}\nTrace log: ${tracePath}`, { cause: error });
+  } finally {
+    progressDisplay.stop();
+    if (options.ai) {
+      process.stderr.write(`${formatAiUsage(addAiUsage(previousUsage, currentUsage))}${resumed ? " Includes previous attempts and this resumed execution." : ""}\n`);
+      if (resumed) process.stderr.write(`This execution: ${formatAiUsage(currentUsage)}\n`);
+    }
   }
   });
 }
@@ -402,27 +417,29 @@ async function showStartupStatus(): Promise<void> {
 
 const program = new Command()
   .name("copilot-changelog")
-  .description("Create a Copilot-enriched offline website and presentation from GitHub's Copilot changelog.")
+  .description("Create a Copilot-enriched offline website and presentation from GitHub's Copilot changelog and selected RSS feeds.")
   .version(packageMetadata.version)
-  .option("--from <date>", "start date in YYYY-MM-DD", defaultFrom())
-  .option("--to <date>", "end date in YYYY-MM-DD", today)
+  .option("-f, --from <date>", "start date in YYYY-MM-DD", defaultFrom())
+  .option("-t, --to <date>", "end date in YYYY-MM-DD", today)
   .option("-o, --output <directory>", "output directory", "output")
   .option("-m, --model <model>", "Copilot model name", "auto")
-  .addOption(new Option("--limit <count>", "maximum number of newest entries").argParser(String))
-  .option("--feed <url-or-file>", "custom RSS URL or local fixture")
-  .option("--slides-language <language>", "slide content language: en or it", "en")
+  .addOption(new Option("-l, --limit <count>", "maximum number of newest entries").argParser(String))
+  .option("-F, --feed <url-or-file>", "replace the base changelog source with an RSS URL or local XML file")
+  .option("-r, --rss <url-or-file...>", "add RSS URLs or local XML files to the selected sources (repeatable)", [])
+  .option("-a, --include-ai-ml", "also collect GitHub Blog AI & ML articles", false)
+  .option("-s, --slides-language <language>", "slide content language: en or it", "en")
   .option(
-    "--speaker-notes-languages <languages>",
+    "-n, --speaker-notes-languages <languages>",
     "comma-separated speaker notes languages: en,it",
     "en",
   )
-  .option("--website", "also create the offline website")
-  .option("--resume", "resume a previous unfinished run without prompting")
-  .option("--restart", "discard a previous unfinished run without prompting")
-  .option("--verbose", "stream execution trace events to stderr (includes AI prompts and responses)")
-  .option("--concurrency <count>", "articles enriched in parallel (1-8)", "1")
-  .option("--request-timeout <seconds>", "maximum wait per Copilot response or initialization operation; timeouts are not retried automatically", "180")
-  .option("--no-ai", "skip Copilot SDK enrichment (intended for testing)")
+  .option("-w, --website", "also create the offline website")
+  .option("-R, --resume", "resume a previous unfinished run without prompting")
+  .option("-S, --restart", "discard a previous unfinished run without prompting")
+  .option("-v, --verbose", "stream execution trace events to stderr (includes AI prompts and responses)")
+  .option("-c, --concurrency <count>", "articles enriched in parallel (1-8)", "1")
+  .option("-T, --request-timeout <seconds>", "maximum wait per Copilot response or initialization operation; timeouts are not retried automatically", "180")
+  .option("-A, --no-ai", "skip Copilot SDK enrichment (intended for testing)")
   .showHelpAfterError()
   .exitOverride();
 
@@ -436,7 +453,7 @@ program
 program
   .command("update")
   .description("Update the CLI to the latest GitHub release")
-  .option("--check", "check for an update without installing it")
+  .option("-k, --check", "check for an update without installing it")
   .action(async (options: { check?: boolean }) => {
     process.stdout.write(`${await updateCli(packageMetadata.version, { checkOnly: options.check })}\n`);
   });

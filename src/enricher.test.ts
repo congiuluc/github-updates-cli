@@ -435,7 +435,26 @@ test("retries transient Copilot request failures", async () => {
     generateSlideReadyContent(sendPrompt, "Initial prompt", ["en"], "Article title"),
   ).resolves.toMatchObject({ details: { feature: "Grouped agent sessions" } });
   expect(sendPrompt).toHaveBeenCalledTimes(2);
-  expect(sendPrompt.mock.calls[1][0]).toBe("Initial prompt");
+  expect(sendPrompt.mock.calls[1][0]).toContain("Initial prompt");
+  expect(sendPrompt.mock.calls[1][0]).toContain("Temporary SDK failure");
+});
+
+test("passes the latest request error without accumulating retry prompts or losing validation feedback", async () => {
+  const valid = explanatoryContent("IDE");
+  const invalid = { ...valid, summary: "A useful update..." };
+  const send = vi.fn()
+    .mockResolvedValueOnce(JSON.stringify(invalid))
+    .mockRejectedValueOnce(new Error("First request error"))
+    .mockRejectedValueOnce(new Error("Second request error"))
+    .mockResolvedValueOnce(JSON.stringify(valid));
+  await expect(generateSlideReadyContent(send, "Original source task", ["en"], "Article title"))
+    .resolves.toMatchObject({ section: "IDE", summary: valid.summary, speakerNotes: valid.speakerNotes });
+  expect(send.mock.calls[2][0]).toContain("First request error");
+  expect(send.mock.calls[2][0]).toContain("summary must be one complete sentence without line breaks or ellipses");
+  expect(send.mock.calls[3][0]).toContain("Second request error");
+  expect(send.mock.calls[3][0]).not.toContain("First request error");
+  expect(send.mock.calls[3][0].match(/Original source task/g)).toHaveLength(1);
+  expect(send.mock.calls[3][0]).toContain("summary must be one complete sentence without line breaks or ellipses");
 });
 
 test("does not retry an SDK timeout on a still-busy session", async () => {
@@ -873,6 +892,16 @@ test("keeps slide content concise without AI", async () => {
     expect(detail.length).toBeLessThanOrEqual(120);
     expect(detail).not.toContain("...");
   }
+});
+
+test("does not label unrelated RSS content as a Copilot announcement", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
+  const [result] = await enrichWithCopilot([
+    changelogPost("Database replication release", "Database replication adds automatic failover. Operators can configure standby nodes."),
+  ], { model: "auto", useAi: false, slidesLanguage: "en", speakerNotesLanguages: ["en"] });
+  expect(result.section).toBe("Announcements");
+  expect(result.details.audience).toBe("Users and administrators affected by this change.");
+  expect(JSON.stringify(result.details)).not.toContain("Copilot");
 });
 
 test("enriches articles with bounded parallelism while preserving order", async () => {

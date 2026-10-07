@@ -15,10 +15,10 @@ $staging = Join-Path $artifacts "copilot-changelog-win-x64"
 $temp = Join-Path $artifacts ".tmp"
 
 if (-not $NodeVersion) {
-    $NodeVersion = (& node --version).TrimStart("v")
+    $NodeVersion = (Get-Content -LiteralPath (Join-Path $root ".node-version") -Raw).Trim()
 }
 if ($NodeVersion -notmatch '^\d+\.\d+\.\d+$') {
-    throw "NodeVersion must be a semantic version such as 24.16.0."
+    throw "NodeVersion must be a semantic version such as 24.21.0."
 }
 
 Remove-Item $staging, $temp -Recurse -Force -ErrorAction SilentlyContinue

@@ -34,7 +34,7 @@
     "build:macos": "bash ./packaging/build-macos.sh"
   },
   "engines": {
-    "node": "^22.12.0 || ^24.0.0 || >=26.0.0"
+    "node": "^24.21.0"
   },
   "overrides": {
     "image-size": "2.0.4"

@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { hostname, tmpdir } from "node:os";
 import { afterEach, expect, test } from "vitest";
+import { emptyAiUsage } from "./usage.js";
 import {
   checkpointMatches,
   loadCheckpoint,
@@ -102,12 +103,14 @@ test("accepts a fully populated checkpoint and validates its compatibility", asy
   directory = await mkdtemp(join(tmpdir(), "copilot-checkpoint-valid-"));
   const path = join(directory, "checkpoint.json");
   const state = validCheckpoint();
+  state.usage = { ...emptyAiUsage(), requests: 2, unreportedRequests: 1, usageEvents: 1, creditReports: 1, totalNanoAiu: 1e9 };
   await saveCheckpoint(path, state);
   expect(await loadCheckpoint(path)).toEqual(state);
   expect(checkpointMatches(state, state.config)).toBe(true);
 });
 
 test.each([
+  ["invalid AI usage", (state: CheckpointState) => ({ ...state, usage: { ...emptyAiUsage(), totalNanoAiu: -1 } })],
   ["null", () => null],
   ["missing language array", (state: CheckpointState) => ({ ...state, config: { ...state.config, speakerNotesLanguages: undefined } })],
   ["invalid language", (state: CheckpointState) => ({ ...state, config: { ...state.config, slidesLanguage: "fr" } })],

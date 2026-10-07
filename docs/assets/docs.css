@@ -175,3 +175,9 @@ figcaption { grid-column: 1 / -1; color: var(--muted); font-size: .75rem; }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
 }
+@media print {
+  .doc-section[hidden] { display: block !important; }
+  .topbar, .sidebar, .skip-link, .copy-button, .page-footer, .toast { display: none !important; }
+  .layout { display: block; max-width: none; padding: 0; }
+  main { max-width: none; }
+}

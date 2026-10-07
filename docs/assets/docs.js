@@ -84,15 +84,6 @@
     contents.open = true;
     search.focus();
   });
-  contents.addEventListener("click", (event) => {
-    const link = event.target.closest('a[href^="#"]');
-    if (!link) return;
-    const section = document.getElementById(link.hash.slice(1));
-    if (mobile.matches) contents.open = false;
-    section.tabIndex = -1;
-    section.focus({ preventScroll: true });
-  });
-
   const navLinks = [...nav.querySelectorAll('a[href^="#"]')];
   const markActive = (id) => {
     for (const link of navLinks) {
@@ -100,15 +91,48 @@
       else link.removeAttribute("aria-current");
     }
   };
-  if ("IntersectionObserver" in window) {
-    const observer = new IntersectionObserver((entries) => {
-      const visible = entries.find((entry) => entry.isIntersecting);
-      if (visible) markActive(visible.target.id);
-    }, { rootMargin: "-15% 0px -60% 0px" });
-    sections.forEach((section) => observer.observe(section));
+  const hashTarget = (hash) => {
+    try {
+      return document.getElementById(decodeURIComponent(hash.slice(1)));
+    } catch (error) {
+      if (!(error instanceof URIError)) throw error;
+      console.warn("The documentation link contains an invalid fragment; showing the overview.", error);
+      return null;
+    }
+  };
+  const showTarget = (target) => {
+    const section = target?.closest(".doc-section") ??
+      (target?.id === "main" ? sections.find((entry) => !entry.hidden) : null) ??
+      sections[0];
+    for (const entry of sections) entry.hidden = entry !== section;
+    markActive(section.id);
+    const label = navLinks.find((link) => link.hash === `#${section.id}`).textContent.trim();
+    document.title = `${label} · Copilot Changelog CLI`;
+    return target ?? section;
+  };
+  const focusTarget = (target) => {
+    target.tabIndex = -1;
+    target.focus({ preventScroll: true });
+  };
+  document.addEventListener("click", (event) => {
+    if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    const link = event.target.closest('a[href^="#"]');
+    if (!link || link.target === "_blank" || link.hasAttribute("download")) return;
+    const target = hashTarget(link.hash);
+    if (!target) return;
+    showTarget(target);
+    if (mobile.matches) contents.open = false;
+    focusTarget(target);
+  });
+  window.addEventListener("hashchange", () => {
+    const target = showTarget(hashTarget(location.hash));
+    focusTarget(target);
+    target.scrollIntoView({ behavior: "instant", block: "start" });
+  });
+  const initialTarget = showTarget(hashTarget(location.hash));
+  if (location.hash) {
+    requestAnimationFrame(() => initialTarget.scrollIntoView({ behavior: "instant", block: "start" }));
   }
-  window.addEventListener("hashchange", () => markActive(location.hash.slice(1)));
-  if (location.hash) markActive(location.hash.slice(1));
 
   const copyStatus = document.querySelector("#copy-status");
   let messageTimer;

@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -130,7 +130,8 @@ describe("parseChangelogFeed", () => {
 
       expect(first[0]?.plainText).toBe("Cached article content.");
       expect(second).toEqual(first);
-      expect(trackedFetch).toHaveBeenCalledTimes(3);
+      expect(trackedFetch).toHaveBeenCalledTimes(2);
+      expect(trackedFetch.mock.calls.some(([url]) => String(url).includes("/wp-json/"))).toBe(false);
     } finally {
       await rm(cacheDirectory, { recursive: true, force: true });
     }
@@ -155,11 +156,11 @@ describe("parseChangelogFeed", () => {
     try {
       const posts = await collectChangelog({
         from: new Date("2026-08-01"), to: new Date("2026-08-31"),
-      }, undefined, { cacheDirectory, fetchImpl });
+      }, undefined, { cacheDirectory, fetchImpl, includeAiMl: true });
       expect(posts).toHaveLength(count);
       const cached = await collectChangelog({
         from: new Date("2026-08-01"), to: new Date("2026-08-31"),
-      }, undefined, { cacheDirectory, fetchImpl });
+      }, undefined, { cacheDirectory, fetchImpl, includeAiMl: true });
       expect(cached).toEqual(posts);
       expect(fetchImpl).toHaveBeenCalledTimes(count + count / 100 + 2);
     } finally {
@@ -175,6 +176,7 @@ describe("parseChangelogFeed", () => {
           from: new Date("2026-08-01"), to: new Date("2026-08-31"),
         }, undefined, {
           cacheDirectory,
+          includeAiMl: true,
           fetchImpl: async (input) => String(input).includes("wp-json")
             ? new Response(JSON.stringify({ code }), { status: 400 }) : new Response("<html></html>"),
         })).rejects.toThrow("HTTP 400");
@@ -310,7 +312,7 @@ describe("parseChangelogFeed", () => {
       expect(requestedUrls).not.toContain(
         "https://github.blog/changelog/2026-08-15-second",
       );
-      expect(fetchImpl).toHaveBeenCalledTimes(3);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
     } finally {
       await rm(cacheDirectory, { recursive: true, force: true });
     }
@@ -346,6 +348,7 @@ describe("parseChangelogFeed", () => {
         to: new Date("2026-08-31T23:59:59Z"),
       }, undefined, {
         cacheDirectory,
+        includeAiMl: true,
         limit: 2,
         onArticlesDiscovered: discovered,
         fetchImpl: async (input) => {
@@ -390,12 +393,11 @@ describe("parseChangelogFeed", () => {
     };
 
     try {
-      await expect(
-        collectChangelog(range, undefined, { cacheDirectory, fetchImpl }),
-      ).rejects.toThrow(
-        /Source preparation failed: 2 of 2 articles[\s\S]*First update[\s\S]*Second update[\s\S]*remain cached/,
-      );
-      expect(fetchImpl).toHaveBeenCalledTimes(4);
+      const collection = collectChangelog(range, undefined, { cacheDirectory, fetchImpl });
+      await expect(collection).rejects.toThrow(/Source preparation failed: 2 of 2 articles[\s\S]*remain cached/);
+      await expect(collection).rejects.toThrow("First update");
+      await expect(collection).rejects.toThrow("Second update");
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
     } finally {
       await rm(cacheDirectory, { recursive: true, force: true });
     }
@@ -468,6 +470,139 @@ describe("parseChangelogFeed", () => {
       expect(posts.map((post) => post.title)).toEqual(["Latest article"]);
     } finally {
       await rm(cacheDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("adds multiple RSS feeds to the default changelog, including non-Copilot articles", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "copilot-added-feeds-"));
+    const localFeed = join(directory, "local.xml");
+    const rss = (title: string, url: string, date: string, body = "Readable source content.") =>
+      `<rss><channel><item><title>${title}</title><link>${url}</link><pubDate>${date}</pubDate>
+        <description>${body}</description></item></channel></rss>`;
+    await writeFile(localFeed, rss("Local engineering news", "https://example.com/local", "2026-08-19"));
+    const remote = "https://example.com/rss";
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/wp-json/")) throw new Error("AI & ML must be opt-in");
+      if (url.includes("opened-months")) return new Response(`<changelog-month data-loaded="true">
+        <article><time datetime="2026-08-18"></time><a class="ChangelogItem-title"
+        href="https://example.com/changelog">Changelog update</a></article></changelog-month>`);
+      if (url === remote) return new Response(rss("Database release", "https://example.com/database", "2026-08-20"));
+      if (url === "https://example.com/changelog") return new Response("<article>Changelog content.</article>");
+      throw new Error(`Unexpected download: ${url}`);
+    });
+    const discovered = vi.fn();
+    const progress = vi.fn();
+    try {
+      const range = { from: new Date("2026-08-01"), to: new Date("2026-08-31") };
+      const posts = await collectChangelog(range, undefined, {
+        cacheDirectory: directory, fetchImpl, additionalFeeds: [remote, localFeed, remote],
+        onArticlesDiscovered: discovered, onArticleProgress: progress,
+      });
+      expect(posts.map((post) => post.title)).toEqual([
+        "Database release", "Local engineering news", "Changelog update",
+      ]);
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+      expect(discovered).toHaveBeenCalledWith(3);
+      expect(progress).toHaveBeenCalledTimes(3);
+      expect(progress).toHaveBeenLastCalledWith(expect.objectContaining({ completed: 3, total: 3, succeeded: true }));
+      const cached = await collectChangelog(range, undefined, {
+        cacheDirectory: directory, fetchImpl, additionalFeeds: [remote, localFeed],
+      });
+      expect(cached).toEqual(posts);
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("merges replacement, added feeds and optional blog before the global limit and content validation", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "copilot-feed-limit-merge-"));
+    const primary = join(directory, "primary.xml");
+    const added = join(directory, "added.xml");
+    const item = (title: string, url: string, date: string, body: string) =>
+      `<item><title>${title}</title><link>${url}</link><pubDate>${date}</pubDate><description>${body}</description></item>`;
+    await writeFile(primary, `<rss><channel>${item("Empty old entry", "https://example.com/old", "2026-08-10", "")}</channel></rss>`);
+    await writeFile(added, `<rss><channel>
+      ${item("Added news", "https://example.com/news", "2026-08-20", "News content.")}
+      ${item("Tracking duplicate", "https://example.com/news/?utm_source=rss#intro", "2026-08-19", "Duplicate.")}
+      ${item("Outside range", "https://example.com/outside", "2026-09-01", "Excluded.")}
+      </channel></rss>`);
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("opened-months")) throw new Error("--feed must replace the changelog");
+      if (url.includes("/wp-json/")) return new Response(JSON.stringify([{
+        title: { rendered: "Opt-in blog" }, link: "https://example.com/blog", date_gmt: "2026-08-21T12:00:00",
+      }]));
+      if (url === "https://example.com/blog") return new Response("<article>Blog content.</article>");
+      throw new Error(`Unexpected download: ${url}`);
+    });
+    try {
+      const posts = await collectChangelog({
+        from: new Date("2026-08-01"), to: new Date("2026-08-31"),
+      }, primary, { cacheDirectory: directory, fetchImpl, additionalFeeds: [added], includeAiMl: true, limit: 2 });
+      expect(posts.map((post) => post.title)).toEqual(["Opt-in blog", "Added news"]);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("does not deduplicate distinct RSS articles that use query-string IDs", () => {
+    const item = (id: number) => `<item><title>Article ${id}</title><link>https://example.com/?p=${id}</link>
+      <pubDate>2026-08-15</pubDate><description>Readable article.</description></item>`;
+    const posts = parseChangelogFeed(`<rss><channel>${item(1)}${item(2)}${item(1)}</channel></rss>`, {
+      from: new Date("2026-08-01"), to: new Date("2026-08-31"),
+    });
+    expect(posts.map((post) => post.url)).toEqual(["https://example.com/?p=1", "https://example.com/?p=2"]);
+  });
+
+  it("deduplicates across RSS sources without dropping query-identified articles", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "copilot-feed-dedup-"));
+    const primary = join(directory, "primary.xml");
+    const additional = join(directory, "additional.xml");
+    const item = (id: number, tracking = "") => `<item><title>Article ${id}</title>
+      <link>https://example.com/?p=${id}${tracking}</link><pubDate>2026-08-15</pubDate>
+      <description>Article content.</description></item>`;
+    await writeFile(primary, `<rss><channel>${item(1)}</channel></rss>`);
+    await writeFile(additional, `<rss><channel>${item(1, "&amp;utm_source=rss#intro")}${item(2)}</channel></rss>`);
+    const fetchImpl = vi.fn();
+    try {
+      const posts = await collectChangelog({
+        from: new Date("2026-08-01"), to: new Date("2026-08-31"),
+      }, primary, { additionalFeeds: [additional], fetchImpl });
+      expect(posts.map((post) => post.url)).toEqual(["https://example.com/?p=1", "https://example.com/?p=2"]);
+      expect(fetchImpl).not.toHaveBeenCalled();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["<html><body>Not a feed</body></html>", "<rss><channel><item></channel></rss>"])(
+    "rejects invalid RSS rather than quietly omitting a configured source: %s", (xml) => {
+      expect(() => parseChangelogFeed(xml, {
+        from: new Date("2026-08-01"), to: new Date("2026-08-31"),
+      })).toThrow(/RSS|XML/);
+    },
+  );
+
+  it.each(["missing", "invalid", "download"])("reports the failing added feed: %s", async (failure) => {
+    const directory = await mkdtemp(join(tmpdir(), "copilot-added-feed-errors-"));
+    const primary = join(directory, "primary.xml");
+    const invalid = join(directory, "invalid.xml");
+    await writeFile(primary, fixture);
+    await writeFile(invalid, "<html>Not RSS</html>");
+    const source = failure === "download" ? "https://example.com/unavailable.xml"
+      : failure === "missing" ? join(directory, "missing.xml") : invalid;
+    try {
+      await expect(collectChangelog({
+        from: new Date("2026-08-01"), to: new Date("2026-08-31"),
+      }, primary, {
+        cacheDirectory: directory, additionalFeeds: [source],
+        fetchImpl: async () => new Response("Unavailable", { status: 503 }),
+      })).rejects.toThrow(source);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
     }
   });
 });

@@ -3,6 +3,7 @@ import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { dirname } from "node:path";
 import { sections, sectionDetailKeys, type Section, type EnrichedPost, type SupportedLanguage } from "./types.js";
+import { isAiUsage, type AiUsage } from "./usage.js";
 
 export interface CheckpointConfig {
   contentVersion: number;
@@ -17,6 +18,7 @@ export interface CheckpointState {
   version: 1;
   config: CheckpointConfig;
   completed: EnrichedPost[];
+  usage?: AiUsage;
 }
 
 export type ExistingRunAction = "resume" | "restart";
@@ -144,6 +146,7 @@ function isCheckpoint(value: unknown): value is CheckpointState {
   if (!isRecord(value) || value.version !== 1 || !isConfig(value.config) || !Array.isArray(value.completed)) {
     return false;
   }
+  if (value.usage !== undefined && !isAiUsage(value.usage)) return false;
   const config = value.config;
   const selectedUrls = new Set(config.postUrls);
   const completedUrls = new Set<string>();

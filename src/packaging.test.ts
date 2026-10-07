@@ -8,6 +8,35 @@ import { expect, test } from "vitest";
 const root = resolve(import.meta.dirname, "..");
 const read = (path: string) => readFile(join(root, path), "utf8");
 
+test("Node LTS pin, runtime requirements, lockfile and documentation stay aligned", async () => {
+  const [pin, manifest, lockfile, readme, docs] = await Promise.all([
+    read(".node-version"), read("package.json"), read("package-lock.json"),
+    read("README.md"), read("docs/index.html"),
+  ]);
+  const version = pin.trim();
+  expect(version).toBe("24.21.0");
+  const pkg = JSON.parse(manifest);
+  const lock = JSON.parse(lockfile);
+  expect(pkg.engines.node).toBe(`^${version}`);
+  expect(lock.packages[""].engines.node).toBe(pkg.engines.node);
+  expect(pkg.devDependencies["@types/node"]).toMatch(/^\^24\./);
+  for (const document of [readme, docs]) {
+    expect(document.replace(/\*\*/g, "")).toContain(`Node.js 24 LTS, version ${version} or newer within 24.x`);
+    expect(document).toContain(".node-version");
+    expect(document).not.toContain("22.12+");
+  }
+});
+
+test("portable packaging defaults to the shared Node LTS pin instead of the host runtime", async () => {
+  const [unix, windows] = await Promise.all([
+    read("packaging/build-unix.sh"), read("packaging/build-portable.ps1"),
+  ]);
+  expect(unix).toContain('NODE_VERSION="${NODE_VERSION:-$(cat "$ROOT/.node-version")}"');
+  expect(unix).not.toContain("$(node --version)");
+  expect(windows).toContain('(Get-Content -LiteralPath (Join-Path $root ".node-version") -Raw).Trim()');
+  expect(windows).not.toContain("(& node --version)");
+});
+
 test("release package and lockfile declare the same version", async () => {
   const [manifest, lockfile] = await Promise.all([
     read("package.json"), read("package-lock.json"),
@@ -154,11 +183,13 @@ test.skipIf(process.platform === "win32")("host guards stop cross-platform and c
     await mkdir(join(fixture, "bin"));
     await mkdir(join(fixture, "packaging"));
     await copyFile(join(root, "packaging/build-unix.sh"), join(fixture, "packaging/build-unix.sh"));
+    await copyFile(join(root, ".node-version"), join(fixture, ".node-version"));
+    const nodeVersion = (await read(".node-version")).trim();
     const node = join(fixture, "bin/node");
     const npm = join(fixture, "bin/npm");
     await writeFile(node, `#!/bin/sh
 case "$*" in
-  "--version") echo v24.0.0 ;;
+  "--version") echo v${nodeVersion} ;;
   "-p process.platform") echo linux ;;
   "-p process.arch") echo x64 ;;
   *) echo 1.0.0 ;;
@@ -167,10 +198,13 @@ esac
     await writeFile(npm, '#!/bin/sh\necho "Unexpected npm invocation" >&2\nexit 99\n');
     await chmod(node, 0o755);
     await chmod(npm, 0o755);
-    for (const target of [["darwin", "x64"], ["linux", "arm64"]]) {
-      const result = spawnSync("bash", [join(fixture, "packaging/build-unix.sh"), ...target], {
+    for (const [platform, arch, override] of [
+      ["darwin", "x64", nodeVersion], ["linux", "arm64", nodeVersion],
+      ["darwin", "x64", ""], ["linux", "arm64", ""],
+    ]) {
+      const result = spawnSync("bash", [join(fixture, "packaging/build-unix.sh"), platform, arch], {
         encoding: "utf8",
-        env: { ...process.env, PATH: `${join(fixture, "bin")}:${process.env.PATH}`, NODE_VERSION: "24.0.0" },
+        env: { ...process.env, PATH: `${join(fixture, "bin")}:${process.env.PATH}`, NODE_VERSION: override },
       });
       expect(result.status, result.stderr).toBe(2);
       expect(result.stderr).toContain("Native packaging requires");
@@ -222,8 +256,11 @@ test("packaged CLI version is checked against the manifest used for release arti
 test.each([".github/workflows/ci.yml", ".github/workflows/release.yml"])(
   "%s validates the lowest supported Node release", async (path) => {
     const workflow = await read(path);
-    expect(workflow).toContain("node: 22.12.0");
-    expect(workflow).toContain("node-version: ${{ matrix.node }}");
+    const setups = workflow.match(/uses: actions\/setup-node@v4/g) ?? [];
+    expect(setups.length).toBeGreaterThan(0);
+    expect(workflow.match(/node-version-file: \.node-version/g)).toHaveLength(setups.length);
+    expect(workflow).not.toContain("node-version:");
+    expect(workflow).not.toContain("node: 22.12.0");
   },
 );
 test("release packaging uses four native Unix runners", async () => {

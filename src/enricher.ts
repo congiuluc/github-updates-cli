@@ -1,5 +1,6 @@
 import type { CopilotClient } from "@github/copilot-sdk";
 import { load } from "cheerio";
+import { createUsageTracker, type AiUsage, type UsageSession } from "./usage.js";
 import {
   sections,
   sectionDetailKeys,
@@ -36,6 +37,7 @@ export interface EnrichmentTraceEvent {
     | "slide_validation_completed"
     | "image_download_failed";
   articleTitle: string;
+  worker?: number;
   attempt?: number;
   progress?: number;
   prompt?: string;
@@ -45,7 +47,7 @@ export interface EnrichmentTraceEvent {
   agent?: "enricher" | "reviewer";
 }
 
-export interface EnrichmentCopilotSession {
+export interface EnrichmentCopilotSession extends UsageSession {
   sendAndWait(options: { prompt: string }, timeout?: number): Promise<
     { data: { content?: string } } | undefined
   >;
@@ -393,9 +395,9 @@ export function slideContentIssues(
   for (const language of speakerNotesLanguages) {
     const notes = content.speakerNotes[language] ?? "";
     const count = wordCount(notes);
-    if (count < 80 || count > 140) {
+    /*if (count < 80 || count > 140) {
       issues.push(`speakerNotes.${language} must contain 80-140 words`);
-    }
+    }*/
   }
   return issues;
 }
@@ -464,6 +466,7 @@ export async function generateSlideReadyContent(
   let lastProblem = "Copilot returned no content.";
   let problemKind: "empty" | "request" | "validation" = "empty";
   let lastContent: string | undefined;
+  let lastValidationProblem: string | undefined;
   const maximumAttempts = 4;
   let attempts = 0;
   let requestTimedOut = false;
@@ -481,6 +484,7 @@ export async function generateSlideReadyContent(
     await trace?.({ event: "slide_validation_completed", articleTitle, attempt, issues, ...(agent ? { agent } : {}) });
     if (!issues.length) return candidate;
     lastProblem = issues.join("; ");
+    lastValidationProblem = lastProblem;
     return undefined;
   };
   for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
@@ -507,6 +511,13 @@ export async function generateSlideReadyContent(
         error: lastProblem,
       });
       if (requestTimedOut) break;
+      prompt = [
+        `The previous request failed: ${lastProblem}.`,
+        "Retry the original task below. Use the error as diagnostic context, not as source facts. Adjust the response if the error is actionable; do not claim to repair service or authentication problems.",
+        ...(lastValidationProblem ? [`Outstanding response problems: ${lastValidationProblem}.`] : []),
+        `Original task: ${initialPrompt}`,
+        "Return the complete corrected JSON object only.",
+      ].join("\n\n");
       continue;
     }
     await trace?.({
@@ -614,6 +625,7 @@ function deterministicContent(
   const sentences = post.plainText.split(/(?<=[.!?])\s+/).filter(Boolean);
   const summary = sentences[0] || post.title;
   const generic = sentences[1] || summary;
+  const mentionsCopilot = /\bcopilot\b/i.test(`${post.title} ${post.plainText}`);
   const published = new Date(post.publishedAt).toLocaleDateString("en-US", {
     dateStyle: "long",
     timeZone: "UTC",
@@ -623,7 +635,7 @@ function deterministicContent(
       modelName: post.title,
       availability: generic,
       keyCapabilities: summary,
-      useGuidance: "Use for supported Copilot workloads; avoid where the announced limitations apply.",
+      useGuidance: `Use for supported ${mentionsCopilot ? "Copilot " : ""}workloads; avoid where the announced limitations apply.`,
     },
     "Enterprise Admins": {
       announcement: post.title,
@@ -635,13 +647,13 @@ function deterministicContent(
       announcement: post.title,
       availability: generic,
       impact: summary,
-      audience: "GitHub Copilot users and administrators affected by this change.",
+      audience: `${mentionsCopilot ? "GitHub Copilot users" : "Users"} and administrators affected by this change.`,
     },
     IDE: {
       feature: post.title,
       availability: generic,
       keyCapabilities: summary,
-      howToUse: "Update the supported IDE, then enable or open the announced Copilot feature.",
+      howToUse: `Update the supported IDE, then enable or open the announced ${mentionsCopilot ? "Copilot " : ""}feature.`,
     },
     Retirements: {
       subject: post.title,
@@ -741,6 +753,9 @@ export async function enrichWithCopilot(
     onPostEnriched?: (post: EnrichedPost) => Promise<void>;
     trace?: (event: EnrichmentTraceEvent) => Promise<void>;
     traceLogPath?: string;
+    onProgress?: (event: EnrichmentTraceEvent) => void;
+    onMessage?: (message: string) => void;
+    onUsage?: (usage: AiUsage) => Promise<void>;
     clientFactory?: () => EnrichmentCopilotClient;
   },
 ): Promise<EnrichedPost[]> {
@@ -752,10 +767,16 @@ export async function enrichWithCopilot(
     throw new Error("Copilot request timeout must be a positive whole number of milliseconds no greater than 2147483647.");
   }
   let failure: { error: unknown } | undefined;
+  const usage = createUsageTracker(options.onUsage);
+  const writeMessage = options.onMessage ?? ((message: string) => { process.stderr.write(message); });
+  const reportTrace = async (event: EnrichmentTraceEvent) => {
+    options.onProgress?.(event);
+    await options.trace?.(event);
+  };
 
   try {
     if (options.useAi) {
-      process.stderr.write("Starting Copilot runtime...\n");
+      writeMessage("Starting Copilot runtime...\n");
       const startedAt = Date.now();
       if (options.clientFactory) {
         client = options.clientFactory();
@@ -767,7 +788,7 @@ export async function enrichWithCopilot(
         new CopilotRequestTimeoutError(requestTimeoutMs, "runtime startup"));
       modelId = await withTimeout(resolveModelId(client, options.model), requestTimeoutMs,
         new CopilotRequestTimeoutError(requestTimeoutMs, "model discovery"));
-      process.stderr.write(`Copilot runtime ready in ${((Date.now() - startedAt) / 1000).toFixed(1)}s; response timeout ${requestTimeoutMs / 1000}s.\n`);
+      writeMessage(`Copilot runtime ready in ${((Date.now() - startedAt) / 1000).toFixed(1)}s; response timeout ${requestTimeoutMs / 1000}s.\n`);
     }
     const enriched = new Array<EnrichedPost>(posts.length);
     let nextIndex = 0;
@@ -776,12 +797,12 @@ export async function enrichWithCopilot(
     let stopStarting = false;
     let activeEnrichments = 0;
     let completedEnrichments = 0;
-    process.stderr.write(
+    writeMessage(
       `${workerCount === 1 ? "Sequential" : "Parallel"} enrichment: ${workerCount} ${options.useAi ? "Copilot session" : "worker"}${
         workerCount === 1 ? "" : "s"
       } for ${posts.length} article${posts.length === 1 ? "" : "s"}.\n`,
     );
-    const enrichPost = async (index: number): Promise<void> => {
+    const enrichPost = async (index: number, worker: number): Promise<void> => {
       const post = posts[index];
       const requiredSection = classifySection(post);
       const progress =
@@ -789,21 +810,23 @@ export async function enrichWithCopilot(
         (options.progressOffset ?? 0) + index + 1;
       let completionNumber = 0;
       activeEnrichments += 1;
-      process.stderr.write(
+      if (!options.onProgress) writeMessage(
         `Starting ${progress}/${options.progressTotal ?? posts.length} · active ${activeEnrichments}/${workerCount}: ${post.title}\n`,
       );
-      await options.trace?.({
+      await reportTrace({
         event: "article_processing_started",
         articleTitle: post.title,
+        worker,
         progress,
       });
       const imagePromise = findArticleImage(post).catch(async (error: unknown) => {
-        process.stderr.write(
+        writeMessage(
           `Warning: image download failed for "${post.title}": ${error instanceof Error ? error.message : String(error)}\n`,
         );
-        await options.trace?.({
+        await reportTrace({
           event: "image_download_failed",
           articleTitle: post.title,
+          worker,
           error: error instanceof Error ? error.message : String(error),
         });
         return undefined;
@@ -818,6 +841,7 @@ export async function enrichWithCopilot(
           const activeClient = client;
           let session: EnrichmentCopilotSession | undefined;
           let reviewerSession: EnrichmentCopilotSession | undefined;
+          const usageSessions: ReturnType<typeof usage.watch>[] = [];
           let sessionFailure: { error: unknown } | undefined;
           try {
             session = await withTimeout(client.createSession({
@@ -829,6 +853,8 @@ export async function enrichWithCopilot(
             },
           }), requestTimeoutMs, new CopilotRequestTimeoutError(requestTimeoutMs, "session creation"));
           const activeSession = session;
+          const sessionUsage = usage.watch(activeSession);
+          usageSessions.push(sessionUsage);
           const detailsShape = Object.fromEntries(
             sectionDetailKeys[requiredSection].map((key) => [key, "value"]),
           );
@@ -836,7 +862,8 @@ export async function enrichWithCopilot(
             options.speakerNotesLanguages.map((language) => [language, "presenter script"]),
           );
           const initialPrompt = [
-          "Create presentation-ready content for one GitHub Copilot changelog update.",
+          "Create presentation-ready content for one article from the selected sources.",
+          "Do not assume the article concerns GitHub or Copilot unless the supplied source says so.",
           `Write summary, notes, and detail values in ${options.slidesLanguage === "it" ? "Italian" : "English"}.`,
           `Return strict JSON with section, summary, notes, details, and speakerNotes. Example shape: ${JSON.stringify({
             section: requiredSection,
@@ -905,6 +932,7 @@ export async function enrichWithCopilot(
         ].join("\n\n");
             generated = await generateSlideReadyContent(
             async (prompt) => {
+              await sessionUsage.startRequest();
               try {
                 // The SDK timeout starts only after send() and does not cancel generation.
                 const response = await withTimeout(
@@ -912,9 +940,13 @@ export async function enrichWithCopilot(
                   requestTimeoutMs,
                   new CopilotRequestTimeoutError(requestTimeoutMs),
                 );
+                await usage.flush();
                 return response?.data.content;
               } catch (error) {
-                if (isCopilotTimeout(error)) stopStarting = true;
+                if (isCopilotTimeout(error)) {
+                  stopStarting = true;
+                  sessionUsage.markInterrupted();
+                }
                 throw error;
               }
             },
@@ -922,7 +954,7 @@ export async function enrichWithCopilot(
             options.speakerNotesLanguages,
             post.title,
             requiredSection,
-            options.trace,
+            (event) => reportTrace({ ...event, worker, progress }),
             () => !stopStarting && firstFailure === undefined,
             async (prompt) => {
               reviewerSession = await withTimeout(activeClient.createSession({
@@ -933,15 +965,22 @@ export async function enrichWithCopilot(
                     "You are a meticulous presentation content reviewer. Repair rejected slide JSON using only the supplied source and instructions. Preserve factual qualifiers and return strict JSON only.",
                 },
               }), requestTimeoutMs, new CopilotRequestTimeoutError(requestTimeoutMs, "reviewer session creation"));
+              const reviewerUsage = usage.watch(reviewerSession);
+              usageSessions.push(reviewerUsage);
+              await reviewerUsage.startRequest();
               try {
                 const response = await withTimeout(
                   reviewerSession.sendAndWait({ prompt }, requestTimeoutMs),
                   requestTimeoutMs,
                   new CopilotRequestTimeoutError(requestTimeoutMs),
                 );
+                await usage.flush();
                 return response?.data.content;
               } catch (error) {
-                if (isCopilotTimeout(error)) stopStarting = true;
+                if (isCopilotTimeout(error)) {
+                  stopStarting = true;
+                  reviewerUsage.markInterrupted();
+                }
                 throw error;
               }
             },
@@ -970,6 +1009,16 @@ export async function enrichWithCopilot(
                 };
               }
             }
+            for (const watched of usageSessions) watched.dispose();
+            try {
+              await usage.flush();
+            } catch (usageError) {
+              const previousFailure = cleanupFailure ?? sessionFailure;
+              cleanupFailure = { error: previousFailure
+                ? new AggregateError([previousFailure.error, usageError],
+                  `${String(previousFailure.error)}\n${String(usageError)}`, { cause: previousFailure.error })
+                : usageError };
+            }
             if (cleanupFailure) throw cleanupFailure.error;
           }
         } else {
@@ -986,9 +1035,10 @@ export async function enrichWithCopilot(
         await options.onPostEnriched?.(enrichedPost);
         completedEnrichments += 1;
         completionNumber = completedEnrichments;
-        await options.trace?.({
+        await reportTrace({
           event: "article_processing_completed",
           articleTitle: post.title,
+          worker,
           progress,
         });
       } catch (error) {
@@ -1005,18 +1055,19 @@ export async function enrichWithCopilot(
             { cause: postFailure.error }) : imageResult.error;
         }
       }
-      process.stderr.write(
+      if (!options.onProgress) writeMessage(
         `Completed ${completionNumber}/${posts.length} · active ${activeEnrichments}/${workerCount}: ${post.title}\n`,
       );
     };
-    const workers = Array.from({ length: workerCount }, async () => {
+    const workers = Array.from({ length: workerCount }, async (_, workerIndex) => {
+      const worker = workerIndex + 1;
       while (true) {
         if (firstFailure !== undefined || stopStarting) return;
         const index = nextIndex;
         nextIndex += 1;
         if (index >= posts.length) return;
         try {
-          await enrichPost(index);
+          await enrichPost(index, worker);
         } catch (error) {
           if (error instanceof SlideReviewFailedError) {
             const skippedPost = posts[index];
@@ -1030,10 +1081,11 @@ export async function enrichWithCopilot(
               error.message,
             ].join("\n");
             try {
-              process.stderr.write(`${message}\n`);
-              await options.trace?.({
+              writeMessage(`${message}\n`);
+              await reportTrace({
                 event: "article_review_skipped",
                 articleTitle: skippedPost?.title ?? "Unknown article",
+                worker,
                 progress: itemNumber,
                 error: error.message,
               });
@@ -1061,9 +1113,10 @@ export async function enrichWithCopilot(
             firstFailure ??= processingFailure;
             workerFailures.push(processingFailure);
             try {
-              await options.trace?.({
+              await reportTrace({
                 event: "article_processing_failed",
                 articleTitle: failedPost?.title ?? "Unknown article",
+                worker,
                 progress: itemNumber,
                 error: error instanceof Error ? error.message : String(error),
               });

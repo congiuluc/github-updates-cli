@@ -1,5 +1,7 @@
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { load } from "cheerio";
-import { XMLParser } from "fast-xml-parser";
+import { XMLParser, XMLValidator } from "fast-xml-parser";
 import {
   NEWS_ARTICLE_CACHE_MAX_AGE_MS,
   NEWS_INDEX_CACHE_MAX_AGE_MS,
@@ -150,6 +152,10 @@ interface ArchivePost {
   publishedAt: string;
 }
 
+interface ArticleSource extends ArchivePost {
+  content?: ChangelogPost;
+}
+
 interface AiBlogApiPost {
   link?: string;
   date_gmt?: string;
@@ -167,6 +173,9 @@ export interface ChangelogCollectionOptions {
   cacheDirectory?: string;
   fetchImpl?: typeof fetch;
   limit?: number;
+  additionalFeeds?: string[];
+  includeAiMl?: boolean;
+  onFeedLoaded?: (feed: { source: string; articles: number; local: boolean }) => void | Promise<void>;
   onArticlesDiscovered?: (total: number) => void | Promise<void>;
   onArticleProgress?: (progress: ChangelogCollectionProgress) => void | Promise<void>;
 }
@@ -235,12 +244,17 @@ export function parseAiBlogApiPage(json: string, range: DateRange): ArchivePost[
 function canonicalArticleUrl(url: string): string {
   const parsed = new URL(url);
   parsed.hash = "";
-  parsed.search = "";
+  for (const key of [...parsed.searchParams.keys()]) {
+    if (/^utm_/i.test(key) || /^(fbclid|gclid)$/i.test(key)) parsed.searchParams.delete(key);
+  }
+  parsed.searchParams.sort();
   parsed.pathname = parsed.pathname.replace(/\/+$/, "") || "/";
   return parsed.href;
 }
 
-export function parseChangelogFeed(xml: string, range: DateRange, limit?: number): ChangelogPost[] {
+function parseFeedEntries(xml: string, range: DateRange): ChangelogPost[] {
+  const validation = XMLValidator.validate(xml);
+  if (validation !== true) throw new Error(`Invalid RSS/XML: ${validation.err.msg}`);
   const parser = new XMLParser({
     ignoreAttributes: false,
     processEntities: true,
@@ -248,6 +262,9 @@ export function parseChangelogFeed(xml: string, range: DateRange, limit?: number
     trimValues: false,
   });
   const document = parser.parse(xml) as { rss?: { channel?: { item?: RssItem | RssItem[] } } };
+  if (!document.rss || document.rss.channel === undefined) {
+    throw new Error("Expected an RSS document with an rss/channel element.");
+  }
   const items = asArray(document.rss?.channel?.item);
   const seenUrls = new Set<string>();
 
@@ -259,12 +276,17 @@ export function parseChangelogFeed(xml: string, range: DateRange, limit?: number
       return published >= range.from.getTime() && published <= range.to.getTime();
     })
     .filter((post) => {
-      if (seenUrls.has(post.url)) return false;
-      seenUrls.add(post.url);
+      const key = canonicalArticleUrl(post.url);
+      if (seenUrls.has(key)) return false;
+      seenUrls.add(key);
       return true;
     })
     .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
-  const selectedPosts = limit ? posts.slice(0, limit) : posts;
+  return posts;
+}
+
+export function parseChangelogFeed(xml: string, range: DateRange, limit?: number): ChangelogPost[] {
+  const selectedPosts = parseFeedEntries(xml, range).slice(0, limit ?? Number.POSITIVE_INFINITY);
   selectedPosts.forEach(assertReadableSource);
   return selectedPosts;
 }
@@ -333,52 +355,74 @@ export async function collectChangelog(
     });
   };
 
-  if (source) {
-    const xml = await fetchText(
-      source,
-      NEWS_INDEX_CACHE_MAX_AGE_MS,
-      "the changelog feed",
-    );
+  const loadFeed = async (feed: string): Promise<ArticleSource[]> => {
+    const local = !/^https?:\/\//i.test(feed);
+    const source = local ? resolve(feed) : feed;
+    let xml: string;
+    if (local) {
+      try {
+        xml = await readFile(source, "utf8");
+      } catch (error) {
+        throw new Error(
+          `Could not read the local feed file at ${source}: ${error instanceof Error ? error.message : String(error)}. Verify the path and file permissions, then retry.`,
+          { cause: error },
+        );
+      }
+    } else {
+      xml = await fetchText(source, NEWS_INDEX_CACHE_MAX_AGE_MS, "the RSS feed");
+    }
     let posts: ChangelogPost[];
     try {
-      posts = parseChangelogFeed(xml, range, options.limit);
+      posts = parseFeedEntries(xml, range);
     } catch (error) {
       throw new Error(
-        `The changelog feed downloaded from ${source} is not valid RSS/XML: ${error instanceof Error ? error.message : String(error)}. Verify the --feed URL or use a valid local feed file.`,
+        `Could not parse the RSS feed at ${source}: ${error instanceof Error ? error.message : String(error)}. Verify the --feed or --rss source and provide valid RSS/XML.`,
         { cause: error },
       );
     }
-    return posts;
-  }
-
-  const archiveUrl = buildArchiveUrl(range);
-  const [archiveHtml, firstBlogPage] = await Promise.all([
-    fetchText(
-      archiveUrl,
-      NEWS_INDEX_CACHE_MAX_AGE_MS,
-      "the GitHub Copilot changelog index",
-    ),
-    fetchText(
+    await options.onFeedLoaded?.({ source, articles: posts.length, local });
+    return posts.map((content) => ({
+      title: content.title, url: content.url, publishedAt: content.publishedAt, content,
+    }));
+  };
+  const loadBlog = async (): Promise<ArchivePost[]> => {
+    const firstBlogPage = await fetchText(
       buildAiBlogApiUrl(range),
       NEWS_INDEX_CACHE_MAX_AGE_MS,
       "the GitHub AI & ML blog index",
-    ),
-  ]);
-  const blogPosts = parseAiBlogApiPage(firstBlogPage, range);
-  let pageSize = (JSON.parse(firstBlogPage) as unknown[]).length;
-  for (let page = 2; pageSize === AI_BLOG_PAGE_SIZE; page += 1) {
-    const json = await fetchText(
-      buildAiBlogApiUrl(range, page),
-      NEWS_INDEX_CACHE_MAX_AGE_MS,
-      `page ${page} of the GitHub AI & ML blog index`,
-      true,
     );
-    pageSize = (JSON.parse(json) as unknown[]).length;
-    blogPosts.push(...parseAiBlogApiPage(json, range));
+    const blogPosts = parseAiBlogApiPage(firstBlogPage, range);
+    let pageSize = (JSON.parse(firstBlogPage) as unknown[]).length;
+    for (let page = 2; pageSize === AI_BLOG_PAGE_SIZE; page += 1) {
+      const json = await fetchText(
+        buildAiBlogApiUrl(range, page),
+        NEWS_INDEX_CACHE_MAX_AGE_MS,
+        `page ${page} of the GitHub AI & ML blog index`,
+        true,
+      );
+      blogPosts.push(...parseAiBlogApiPage(json, range));
+      pageSize = (JSON.parse(json) as unknown[]).length;
+    }
+    return blogPosts;
+  };
+  const additionalFeeds = [...new Set(options.additionalFeeds ?? [])].filter((feed) => feed !== source);
+  const sources = await Promise.allSettled([
+    source ? loadFeed(source) : fetchText(
+      buildArchiveUrl(range), NEWS_INDEX_CACHE_MAX_AGE_MS, "the GitHub Copilot changelog index",
+    ).then((html) => parseArchivePage(html, range)),
+    ...(options.includeAiMl ? [loadBlog()] : []),
+    ...additionalFeeds.map(loadFeed),
+  ]);
+  const discoveryErrors = sources.filter((result) => result.status === "rejected").map((result) => result.reason);
+  if (discoveryErrors.length === 1) throw discoveryErrors[0];
+  if (discoveryErrors.length) {
+    throw new AggregateError(discoveryErrors, `Source discovery failed: ${discoveryErrors.map(
+      (error) => error instanceof Error ? error.message : String(error),
+    ).join("\n")}`);
   }
-  const merged = [...parseArchivePage(archiveHtml, range), ...blogPosts]
+  const merged = sources.flatMap((result) => result.status === "fulfilled" ? result.value : [])
     .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
-  const unique = new Map<string, ArchivePost>();
+  const unique = new Map<string, ArticleSource>();
   for (const post of merged) {
     const key = canonicalArticleUrl(post.url);
     if (!unique.has(key)) unique.set(key, post);
@@ -397,17 +441,22 @@ export async function collectChangelog(
         const post = selectedPosts[index];
         let succeeded = false;
         try {
-          const articleHtml = await fetchText(
-            post.url,
-            NEWS_ARTICLE_CACHE_MAX_AGE_MS,
-            `the article "${post.title}"`,
-          );
-          posts[index] = extractArticleData(
-            post.title,
-            post.url,
-            post.publishedAt,
-            articleHtml,
-          );
+          if (post.content) {
+            assertReadableSource(post.content);
+            posts[index] = post.content;
+          } else {
+            const articleHtml = await fetchText(
+              post.url,
+              NEWS_ARTICLE_CACHE_MAX_AGE_MS,
+              `the article "${post.title}"`,
+            );
+            posts[index] = extractArticleData(
+              post.title,
+              post.url,
+              post.publishedAt,
+              articleHtml,
+            );
+          }
           succeeded = true;
         } catch (error) {
           failures.push({ post, error });
@@ -440,7 +489,7 @@ export async function collectChangelog(
     const omitted = failures.length > 5 ? `\n- ${failures.length - 5} more download failures.` : "";
     throw new Error(
       [
-        `Source preparation failed: ${failures.length} of ${selectedPosts.length} articles could not be downloaded.`,
+        `Source preparation failed: ${failures.length} of ${selectedPosts.length} articles could not be prepared.`,
         "Copilot enrichment was not started because every selected article must be available first.",
         details + omitted,
         `Successfully downloaded articles remain cached in ${options.cacheDirectory ?? defaultNewsCacheDirectory()}. Fix the reported connection or URL problem, then rerun the same command.`,

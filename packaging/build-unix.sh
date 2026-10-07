@@ -3,7 +3,8 @@ set -euo pipefail
 
 PLATFORM="${1:-}"
 ARCH="${2:-}"
-NODE_VERSION="${NODE_VERSION:-$(node --version)}"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+NODE_VERSION="${NODE_VERSION:-$(cat "$ROOT/.node-version")}"
 NODE_VERSION="${NODE_VERSION#v}"
 
 if [[ "$PLATFORM" != "linux" && "$PLATFORM" != "darwin" ]]; then
@@ -15,7 +16,7 @@ if [[ "$ARCH" != "x64" && "$ARCH" != "arm64" ]]; then
   exit 2
 fi
 if [[ ! "$NODE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "NODE_VERSION must be a semantic version such as 24.16.0." >&2
+  echo "NODE_VERSION must be a semantic version such as 24.21.0." >&2
   exit 2
 fi
 
@@ -26,7 +27,6 @@ if [[ "$PLATFORM" != "$HOST_PLATFORM" || "$ARCH" != "$HOST_ARCH" ]]; then
   exit 2
 fi
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="$(node -p "require('$ROOT/package.json').version")"
 ARTIFACTS="$ROOT/artifacts"
 STAGING="$ARTIFACTS/copilot-changelog-$PLATFORM-$ARCH"

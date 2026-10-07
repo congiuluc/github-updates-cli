@@ -50,6 +50,33 @@ test("all CLI options are documented in the complete guide", async () => {
   }
 });
 
+test("source documentation makes the blog opt-in and distinguishes additive RSS from replacement feeds", () => {
+  const sourceGuide = $("#sources").text();
+  expect(sourceGuide).toContain("AI & ML articles are disabled by default");
+  expect(sourceGuide).toContain("--include-ai-ml");
+  expect(sourceGuide).toContain("--rss");
+  expect(sourceGuide).toContain("--feed replaces the base changelog");
+  expect($("#cli-reference").text()).toContain("--rss <url-or-file...>");
+  expect(readme).toContain("copilot-changelog --include-ai-ml");
+});
+
+test("every declared option has a unique short alias documented with its long name", async () => {
+  const cli = await readFile(resolve(root, "src", "cli.ts"), "utf8");
+  const flags = [...cli.matchAll(/(?:\.option\(|new Option\()\s*["']([^"']+)/g)].map((match) => match[1]);
+  const shortOptions: string[] = [];
+  const rows = $("#cli-reference tr").toArray().map((row) => $(row).text());
+  for (const flag of flags) {
+    const match = /^(-[a-zA-Z]), (--[a-z][a-z-]*)/.exec(flag);
+    expect(match, `Missing short alias: ${flag}`).not.toBeNull();
+    if (!match) continue;
+    const [, short, long] = match;
+    shortOptions.push(short);
+    expect(rows.some((row) => row.includes(`${short}, ${long}`)), `Missing documented pair: ${flag}`).toBe(true);
+  }
+  expect(new Set(shortOptions).size).toBe(shortOptions.length);
+  expect(readme).toContain("case-sensitive");
+  expect(readme).toContain("-f 2026-08-01 -t 2026-08-31");
+});
 test("documentation has accessible fallbacks without JavaScript", () => {
   expect($("h1")).toHaveLength(1);
   expect($("main")).toHaveLength(1);
@@ -65,6 +92,21 @@ test("documentation has accessible fallbacks without JavaScript", () => {
     expect($(image).attr("height")).toBeTruthy();
   }
   for (const table of $("table").toArray()) expect($(table).find("caption").text()).not.toBe("");
+});
+
+test("installation and presentation guidance matches current authentication and validation behavior", () => {
+  expect($("#install").text()).toContain("/login");
+  expect($("#install").text()).toContain("Copilot Requests");
+  expect($("#install").text()).not.toContain("gh auth refresh --scopes copilot");
+  expect($("#presentation").text()).toContain("not a currently enforced word-count limit");
+  expect($("#install").text()).toContain("Published packages may not yet contain every option");
+  expect(readme).toContain("published releases may lag behind");
+});
+
+test("printing includes sections hidden by topic navigation", async () => {
+  const css = await readFile(resolve(docsRoot, "assets", "docs.css"), "utf8");
+  expect(css).toMatch(/@media print\s*\{\s*\.doc-section\[hidden\]\s*\{\s*display:\s*block\s*!important;/);
+  expect($("#contents summary").text()).toContain("Documentation topics");
 });
 
 test("the concise README links to documentation topics that exist", async () => {
