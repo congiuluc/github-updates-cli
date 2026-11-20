@@ -119,7 +119,7 @@ function isCopilotTimeout(error: unknown): boolean {
     (error instanceof Error && /^Timeout after \d+ms waiting for session\.idle$/.test(error.message));
 }
 
-async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, error: Error): Promise<T> {
+export async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, error: Error): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
@@ -133,7 +133,7 @@ async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, error: E
   }
 }
 
-async function resolveModelId(
+export async function resolveModelId(
   client: EnrichmentCopilotClient,
   requestedModel: string,
 ): Promise<string> {

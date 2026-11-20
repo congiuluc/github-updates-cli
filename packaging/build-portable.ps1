@@ -35,6 +35,14 @@ try {
     foreach ($entry in @("package.json", "package-lock.json", "dist", "assets", "README.md")) {
         Copy-Item -LiteralPath (Join-Path $root $entry) -Destination $application -Recurse
     }
+    $skillSource = Join-Path $root ".github\skills\github-copilot-changelog-deck"
+    $skillTarget = Join-Path $application ".github\skills\github-copilot-changelog-deck"
+    New-Item -ItemType Directory -Force -Path $skillTarget, (Join-Path $skillTarget "scripts") | Out-Null
+    foreach ($entry in @("SKILL.md", "assets", "references")) {
+        Copy-Item -LiteralPath (Join-Path $skillSource $entry) -Destination $skillTarget -Recurse
+    }
+    Get-ChildItem -LiteralPath (Join-Path $skillSource "scripts") -Filter "*.py" -File |
+        Copy-Item -Destination (Join-Path $skillTarget "scripts")
     & npm ci --omit=dev --no-audit --no-fund --prefix $application
     if ($LASTEXITCODE -ne 0) { throw "Production dependency installation failed." }
 

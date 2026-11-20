@@ -60,6 +60,22 @@ test("source documentation makes the blog opt-in and distinguishes additive RSS 
   expect(readme).toContain("copilot-changelog --include-ai-ml");
 });
 
+test("skill documentation explains dependencies, recovery, license and static QA", () => {
+  const guide = $("#skill-mode").text();
+  for (const phrase of ["Python 3.9", "python-pptx", "Pillow", "LibreOffice", "Personal use",
+    "--resume", "--restart", "six sections", "Static checks run on the generated deck",
+    "QA errors", "--no-ai"]) {
+    expect(guide).toContain(phrase);
+  }
+  expect(guide).toContain("pip also installs its dependencies, including Pillow");
+  expect(guide).toContain("render-pptx==0.2.0");
+  expect(guide).toContain("do not verify visual layout");
+  expect($("#cli-reference").text()).toContain("-P, --python");
+  expect($("#cli-reference").text()).toContain("-X, --preview");
+  expect($("#cli-reference").text()).not.toContain("--soffice");
+  expect(readme).toContain("copilot-changelog skill");
+});
+
 test("extended workflow documentation explains safety and persistence boundaries", () => {
   expect($("#profiles-preview").text()).toContain("Arrays supplied on the CLI replace profile arrays");
   expect($("#profiles-preview").text()).toContain("downloads no article pages");
@@ -70,18 +86,25 @@ test("extended workflow documentation explains safety and persistence boundaries
 });
 test("every declared option has a unique short alias documented with its long name", async () => {
   const cli = await readFile(resolve(root, "src", "cli.ts"), "utf8");
-  const flags = [...cli.matchAll(/(?:\.option\(|new Option\()\s*["']([^"']+)/g)].map((match) => match[1]);
-  const shortOptions: string[] = [];
   const rows = $("#cli-reference tr").toArray().map((row) => $(row).text());
-  for (const flag of flags) {
-    const match = /^(-[a-zA-Z]), (--[a-z][a-z-]*)/.exec(flag);
-    expect(match, `Missing short alias: ${flag}`).not.toBeNull();
-    if (!match) continue;
-    const [, short, long] = match;
-    shortOptions.push(short);
-    expect(rows.some((row) => row.includes(`${short}, ${long}`)), `Missing documented pair: ${flag}`).toBe(true);
+  const skillStart = cli.indexOf('.command("skill")');
+  const skillEnd = cli.indexOf("program.action", skillStart);
+  expect(skillStart).toBeGreaterThan(-1);
+  expect(skillEnd).toBeGreaterThan(skillStart);
+  const scopes = [cli.slice(0, skillStart) + cli.slice(skillEnd), cli.slice(skillStart, skillEnd)];
+  for (const scope of scopes) {
+    const flags = [...scope.matchAll(/(?:\.option\(|new Option\()\s*["']([^"']+)/g)].map((match) => match[1]);
+    const shortOptions: string[] = [];
+    for (const flag of flags) {
+      const match = /^(-[a-zA-Z]), (--[a-z][a-z-]*)/.exec(flag);
+      expect(match, `Missing short alias: ${flag}`).not.toBeNull();
+      if (!match) continue;
+      const [, short, long] = match;
+      shortOptions.push(short);
+      expect(rows.some((row) => row.includes(`${short}, ${long}`)), `Missing documented pair: ${flag}`).toBe(true);
+    }
+    expect(new Set(shortOptions).size).toBe(shortOptions.length);
   }
-  expect(new Set(shortOptions).size).toBe(shortOptions.length);
   expect(readme).toContain("case-sensitive");
   expect(readme).toContain("--from 2026-08-01 --to 2026-08-31");
 });

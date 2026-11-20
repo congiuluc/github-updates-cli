@@ -8,7 +8,7 @@ import {
   defaultNewsCacheDirectory,
   readThroughNewsCache,
 } from "./news-cache.js";
-import type { ChangelogPost, DateRange, SourceLink } from "./types.js";
+import type { ChangelogPost, ChangelogType, DateRange, SourceLink } from "./types.js";
 
 export const CHANGELOG_FEED_URL = "https://github.blog/changelog/feed/?label=copilot";
 export const CHANGELOG_URL = "https://github.blog/changelog/?label=copilot";
@@ -34,6 +34,14 @@ function assertReadableSource(post: Pick<ChangelogPost, "title" | "url" | "plain
   }
 }
 
+function changelogType(value: string): ChangelogType | undefined {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "release") return "Release";
+  if (normalized === "improvement") return "Improvement";
+  if (normalized === "retired") return "Retired";
+  return undefined;
+}
+
 function articleData(
   title: string,
   url: string,
@@ -41,6 +49,7 @@ function articleData(
   html: string,
   author?: string,
   baseUrl = url,
+  type?: ChangelogType,
 ): ChangelogPost {
   const $ = load(html);
   $("script, style, noscript").remove();
@@ -64,6 +73,7 @@ function articleData(
     title,
     url,
     publishedAt,
+    ...(type ? { changelogType: type } : {}),
     author,
     plainText: $("body").text().replace(/\s+/g, " ").trim(),
     html,
@@ -77,6 +87,7 @@ function extractArticleData(
   url: string,
   publishedAt: string,
   articleHtml: string,
+  fallbackType?: ChangelogType,
 ): ChangelogPost {
   const $ = load(articleHtml);
   $("script, style, noscript, nav, footer").remove();
@@ -104,11 +115,13 @@ function extractArticleData(
     $('meta[name="author"]').attr("content") ??
     article.find('[rel="author"], .byline, [class*="author"]').first().text().replace(/\s+/g, " ").trim() ??
     undefined;
+  const type = changelogType($(".ChangelogHeader-single-tag .Tag--type").first().text()) ?? fallbackType;
 
   return {
     title,
     url,
     publishedAt,
+    ...(type ? { changelogType: type } : {}),
     author: author || undefined,
     plainText,
     html: contentRoot.html() ?? "",
@@ -140,6 +153,7 @@ interface ArchivePost {
   title: string;
   url: string;
   publishedAt: string;
+  changelogType?: ChangelogType;
 }
 
 export interface SelectedArticle extends ArchivePost {
@@ -219,7 +233,8 @@ function parseArchiveEntries(html: string, range: DateRange): ArchivePost[] {
       return;
     }
 
-    posts.push({ title, url, publishedAt: publishedAt.toISOString() });
+    const type = changelogType($(element).closest("article").find(".Tag--type, .Tag--type-alt").first().text());
+    posts.push({ title, url, publishedAt: publishedAt.toISOString(), ...(type ? { changelogType: type } : {}) });
   });
   return posts;
 }
@@ -350,7 +365,10 @@ function parseFeedEntries(xml: string, range: DateRange, sourceUrl?: string): Ch
       ? xmlChildren(child("author").length ? child("author") : xmlChildren(root, "author").first(), "name").first().text()
       : (child("creator").text() || child("author").text());
     const baseUrl = xmlBase(body.length ? body : item, sourceUrl, atom ? sourceUrl ?? url : url) ?? url;
-    posts.push(articleData(title, url, publishedAt.toISOString(), html, author.trim() || undefined, baseUrl));
+    const type = xmlChildren(item, "category").toArray()
+      .map((category) => changelogType(atom ? ($(category).attr("term") ?? "") : $(category).text()))
+      .find((value) => value !== undefined);
+    posts.push(articleData(title, url, publishedAt.toISOString(), html, author.trim() || undefined, baseUrl, type));
   });
   return posts;
 }
@@ -580,6 +598,7 @@ export async function prepareChangelog(
               post.url,
               post.publishedAt,
               articleHtml,
+              post.changelogType ?? post.content?.changelogType,
             );
           }
           succeeded = true;

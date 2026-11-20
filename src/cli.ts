@@ -121,6 +121,47 @@ program
     writeConsoleMessage(`${await removeStaleRunLock(path)}\n`, "success", process.stdout);
   });
 
+const skillFrom = new Date();
+skillFrom.setUTCDate(skillFrom.getUTCDate() - 29);
+program
+  .command("skill")
+  .description("Generate the Italian six-section deck with the bundled changelog skill")
+  .option("-f, --from <date>", "start date in YYYY-MM-DD", skillFrom.toISOString().slice(0, 10))
+  .option("-t, --to <date>", "end date in YYYY-MM-DD", today)
+  .option("-o, --output <directory>", "output directory", "output")
+  .option("-m, --model <model>", "Copilot model name", "auto")
+  .option("-l, --limit <count>", "maximum number of newest articles")
+  .option("-F, --feed <url-or-file>", "GitHub Copilot changelog RSS/Atom feed or local feed file")
+  .option("-T, --request-timeout <seconds>", "maximum wait for a Copilot operation", "180")
+  .option("-b, --max-credits <credits>", "soft cumulative AI credit limit, including resumed attempts")
+  .option("-P, --python <executable>", "Python 3.9+ executable")
+  .option("-X, --preview", "generate approximate PNG previews using render-pptx")
+  .option("-J, --author <text>", "author line on the deck", "Copilot Changelog CLI")
+  .option("-R, --resume", "resume accepted records from the previous unfinished skill run")
+  .option("-S, --restart", "discard the previous skill checkpoint and start again")
+  .action(async (_options: import("./skill-deck.js").SkillDeckOptions, command: Command) => {
+    for (const option of program.options) {
+      const key = option.attributeName();
+      if (program.getOptionValueSource(key) !== "cli") continue;
+      if (!command.options.some((skillOption) => skillOption.attributeName() === key)) {
+        throw new Error(`${option.long ?? option.flags} is not available in skill mode.`);
+      }
+      if (command.getOptionValueSource(key) !== "cli") {
+        command.setOptionValueWithSource(key, program.getOptionValue(key), "cli");
+      }
+    }
+    const [{ runSkillDeck }, { CreditLimitError }] = await Promise.all([
+      import("./skill-deck.js"), import("./usage.js"),
+    ]);
+    try {
+      await runSkillDeck(command.opts<import("./skill-deck.js").SkillDeckOptions>());
+    } catch (error) {
+      if (!(error instanceof CreditLimitError)) throw error;
+      writeConsoleMessage(`${error.message}\nNo deck was delivered; resume after reviewing the budget.\n`, "warning");
+      process.exitCode = 2;
+    }
+  });
+
 program.action(async (options: CliOptions, command: Command) => {
   const profile = await loadProfile(options.config, options.profile);
   for (const [key, value] of Object.entries(profile)) {

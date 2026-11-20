@@ -1,0 +1,42 @@
+{
+ "_comment": "Esempio dalla run del 19/11/2026. period_start/period_end obbligatori (YYYY-MM-DD). highlights (max 3): {date,label,detail} conta le news di quel giorno, {count_section,label,detail} conta una sezione, {value,label,detail} valore fisso. actions: 4 {title, body} per la slide finale. highlights e actions sono specifici della run: riscriverli dai dati, o ometterli per i default.",
+ "period_start": "2026-10-01",
+ "period_end": "2026-11-19",
+ "author": "Luca Congiu · Cloud Solution Architect",
+ "deck_date": "19 novembre 2026",
+ "highlights": [
+  {
+   "date": "2026-10-28",
+   "label": "annunci a GitHub Universe (28 ottobre)",
+   "detail": "Fusion, Automations, Agent Merge, cloud, plugin enterprise"
+  },
+  {
+   "date": "2026-11-17",
+   "label": "annunci a Microsoft Ignite (17 novembre)",
+   "detail": "Azure DevOps nell'app, browser use, Agent 365, MAI Code 2"
+  },
+  {
+   "count_section": "modelli",
+   "label": "news sui modelli nel periodo",
+   "detail": "GPT-6.1 e 6.2, Gemini 4, Claude Fable 5.2 e Haiku 5.5, MAI Code 2, Fusion"
+  }
+ ],
+ "actions": [
+  {
+   "title": "Aggiorna le policy dei modelli",
+   "body": "Abilita le alternative prima del 14/12 e del 18/12/2026; verifica i modelli già dismessi a ottobre e novembre."
+  },
+  {
+   "title": "Pianifica l'uscita dal Local harness",
+   "body": "Porta i team sul Copilot harness di VS Code prima della rimozione di febbraio 2027."
+  },
+  {
+   "title": "Rivedi governance, metriche e sicurezza",
+   "body": "Managed settings, plugin di team, telemetria con attribuzione utente, API delle metriche e Agent 365."
+  },
+  {
+   "title": "Prova le novità di Universe e Ignite",
+   "body": "Fusion, Automations, Agent Merge, computer e browser use, Azure DevOps nell'app e code review adattiva."
+  }
+ ]
+}

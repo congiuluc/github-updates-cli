@@ -1,0 +1,109 @@
+[
+ {
+  "id": 2,
+  "date": "2026-11-18",
+  "title": "Gemini 4 Neon in GitHub Copilot",
+  "type": "Release",
+  "section": "modelli",
+  "url": "https://github.blog/changelog/2026-11-18-gemini-4-neon-in-github-copilot",
+  "category": "modelli",
+  "status": "GA",
+  "hero_value": "GA",
+  "hero_label": "Gemini 4 Neon disponibile in GitHub Copilot",
+  "summary": "Gemini 4 Neon di Google è GA in GitHub Copilot, pensato per coding agentico, uso multistep di tool e knowledge work.",
+  "points": [
+   "Progettato per coding agentico, uso multistep di tool e knowledge work",
+   "Secondo Google: qualità vicina a Gemini 4 Carbon con costo in token per task inferiore",
+   "Rispetto a Carbon risponde prima e fa meno modifiche non richieste sul codice",
+   "Fatturato a prezzo di listino del provider con usage-based billing; rollout graduale"
+  ],
+  "availability": "Pro+, Max, Business, Enterprise · VS Code, Visual Studio, CLI, coding agent, app, github.com, Mobile, JetBrains, Xcode",
+  "how_to": "Selezionalo nel model picker. Business/Enterprise: attivo di default salvo global default off o modello disabilitato",
+  "facts": [
+   "Pro+ · Max · Bus. · Ent.",
+   "Model picker",
+   "Rollout graduale"
+  ],
+  "doc_links": [
+   {
+    "title": "Models and pricing for GitHub Copilot",
+    "url": "https://docs.github.com/copilot/reference/copilot-billing/models-and-pricing"
+   },
+   {
+    "title": "documentation on models",
+    "url": "https://docs.github.com/copilot/reference/ai-models/supported-models"
+   }
+  ],
+  "image_kind": "article"
+ },
+ {
+  "id": 108,
+  "date": "2026-10-13",
+  "title": "Enterprise managed settings enforcement updates",
+  "url": "https://github.blog/changelog/2026-10-13-enterprise-managed-settings-enforcement-updates/",
+  "type": "Improvement",
+  "section": "governance",
+  "category": "governance",
+  "status": "DISPONIBILE",
+  "hero_value": "Refresh",
+  "hero_label": "Policy aggiornate obbligatorie all'avvio del client",
+  "summary": "Gli admin enterprise possono obbligare i client Copilot a scaricare i managed settings aggiornati all'avvio e imporre versioni minime.",
+  "points": [
+   "forceRemoteSettingsRefresh a true: la policy va confermata all'avvio, la cache non basta",
+   "Se la policy corrente non è confermabile, il client fallisce in modo chiuso (fail closed)",
+   "MDM e file-based impongono il refresh già prima del primo sign-in; server-managed dopo la prima ricezione",
+   "Versione minima del client obbligatoria per la chiave sandbox: i client vecchi vanno aggiornati"
+  ],
+  "availability": "Copilot CLI, VS Code e app GitHub Copilot · settings server-managed, MDM-managed o file-based",
+  "how_to": "Imposta forceRemoteSettingsRefresh a true nei managed settings enterprise; vedi Deploying enterprise managed settings",
+  "facts": [
+   "Fail closed",
+   "CLI · VS Code · app",
+   "Min. version: sandbox"
+  ],
+  "doc_links": [
+   {
+    "title": "required minimum client version",
+    "url": "https://docs.github.com/en/enterprise-cloud@latest/copilot/reference/enterprise-administrators/enterprise-managed-settings#minimum-client-version-enforcement-for-sandbox"
+   },
+   {
+    "title": "Deploying enterprise managed settings",
+    "url": "https://docs.github.com/enterprise-cloud@latest/copilot/how-tos/administer-copilot/manage-for-enterprise/use-managed-settings/deploy-managed-settings#requiring-fresh-server-managed-settings-on-startup"
+   }
+  ],
+  "image_kind": "generated"
+ },
+ {
+  "id": 19,
+  "date": "2026-11-16",
+  "title": "GitHub Copilot models deprecated on November 16, 2026",
+  "type": "Retired",
+  "section": "retired",
+  "url": "https://github.blog/changelog/2026-11-16-github-copilot-models-deprecated-on-november-16-2026/",
+  "category": "modelli",
+  "status": "DISMESSO",
+  "hero_value": "3",
+  "hero_label": "Modelli deprecati il 16 novembre 2026",
+  "summary": "Dal 16 novembre 2026 tre modelli sono deprecati nella maggior parte delle esperienze Copilot, con alternative suggerite.",
+  "points": [
+   "Claude Opus 4.8 → 2026-11-16 → Claude Opus 5.5 (resta per individuali su piani annuali)",
+   "Claude Opus 5 → 2026-11-16 → Claude Opus 5.5 (fuori dal picker, resta come fallback runtime)",
+   "GPT-5.6 Terra → 2026-11-16 → GPT-6.1 Sol o GPT-6 Luna",
+   "Riguarda Chat, inline edits, modalità ask e agent e code completions; annunciato il 15 ottobre"
+  ],
+  "availability": "Tutti i piani Copilot; alternative abilitate automaticamente per Business ed Enterprise con default model enablement",
+  "how_to": "Nessuna azione per rimuovere i modelli; se il default globale è off, abilita le alternative nelle model policy di Copilot",
+  "facts": [
+   "Deprecati il 16/11/2026",
+   "Alternativa: Opus 5.5",
+   "Policy modelli invariate"
+  ],
+  "doc_links": [
+   {
+    "title": "our documentation on models",
+    "url": "https://docs.github.com/copilot/reference/ai-models/supported-models?utm_source=model-release-announcement&utm_medium=changelog&utm_campaign=newmodels"
+   }
+  ],
+  "image_kind": "generated"
+ }
+]

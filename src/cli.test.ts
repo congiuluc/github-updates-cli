@@ -81,6 +81,25 @@ function mockCopilotImport(recover: boolean, usage: "reported" | "missing" | "fa
   `)}`;
 }
 
+test("skill mode honors supported root options, favors local options, and rejects unsupported ones", async () => {
+  const command = ["--import", "tsx", resolve("src/cli.ts")];
+  const run = (args: string[]) => execFileAsync(process.execPath, [...command, ...args], {
+    cwd: resolve("."), env: cliEnvironment, timeout: 20_000,
+  });
+  await expect(run(["--from", "bad-root-date", "skill"])).rejects.toMatchObject({
+    code: 1, stderr: expect.stringContaining('Invalid date "bad-root-date"'),
+  });
+  await expect(run(["--from", "bad-root-date", "skill", "--from", "bad-skill-date"])).rejects.toMatchObject({
+    code: 1, stderr: expect.stringContaining('Invalid date "bad-skill-date"'),
+  });
+  await expect(run(["--no-ai", "skill"])).rejects.toMatchObject({
+    code: 1, stderr: expect.stringContaining("--no-ai is not available in skill mode."),
+  });
+  await expect(run(["skill", "--soffice", "soffice"])).rejects.toMatchObject({
+    code: 1, stderr: expect.stringContaining("unknown option '--soffice'"),
+  });
+}, 60_000);
+
 test("rejects a second CLI process before --restart can touch an active run", async () => {
   outputDirectory = await mkdtemp(join(tmpdir(), "copilot-changelog-cli-locked-"));
   const stem = ".copilot-changelog-2026-08-01-to-2026-08-31";

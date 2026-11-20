@@ -57,6 +57,7 @@
           <a href="#sources">Sources &amp; collection</a>
           <a href="#profiles-preview">Profiles &amp; preview</a>
           <a href="#presentation">Presentation design</a>
+          <a href="#skill-mode">Italian skill deck</a>
           <a href="#review">AI review &amp; corrections</a>
           <a href="#review-content">Edit, reuse &amp; regenerate</a>
           <a href="#outputs">Outputs &amp; trace logs</a>
@@ -144,6 +145,21 @@ npm install --global .</code></pre></div>
         <div class="code-block"><div class="code-heading"><span>Five newest matching entries</span></div><pre><code>copilot-changelog --from 2026-08-01 --to 2026-08-31 --limit 5 --output output-demo</code></pre></div>
         <p>Generation commands print the installed version and perform a short release check. Interactive terminals use cyan for information, green for success, yellow for warnings/retries, red for failures and dim text for trace paths. Messages retain their descriptive text, so color is never the only signal. <code>NO_COLOR</code> disables colors; redirected output and <code>TERM=dumb</code> stay plain. Progress and the final human-readable summary go to stderr; generated file-path records remain on stdout.</p>
         <p>The startup release check has a three-second deadline, including the response body. A failed check does not prevent generation.</p>
+      </section>
+
+      <section id="skill-mode" class="doc-section" aria-labelledby="skill-mode-title">
+        <p class="eyebrow">Guides / Bundled skill</p>
+        <h2 id="skill-mode-title">Italian changelog deck</h2>
+        <p><code>copilot-changelog skill</code> is an opt-in workflow using the packaged <code>github-copilot-changelog-deck</code> skill and its Python renderer. The ordinary command keeps its existing five-section behavior. Skill mode produces an Italian deck with six sections in order: Modelli, Release, Improvement, Governance, IDE and Retired; empty sections remain visible with zero news. Original article titles are preserved. Each article has a cover and detail slide, with its date; section indexes are hidden but linked from the agenda, and article references live in speaker notes.</p>
+        <h3>Prerequisites</h3>
+        <p>Authenticate to GitHub Copilot as described in <a href="#install">installation</a>. Install Python 3.9 or newer and run <code>python -m pip install python-pptx</code>; pip also installs its dependencies, including Pillow. To generate optional previews, install <code>python -m pip install render-pptx==0.2.0</code> and pass <code>--preview</code>. Python and these packages are not bundled in the platform releases. LibreOffice and PDF rendering libraries are not required by skill mode. The command checks the required dependencies before using AI; use <code>--python</code> to select an interpreter that is not on the standard path.</p>
+        <div class="code-block"><div class="code-heading"><span>Generate a skill deck</span></div><pre><code>copilot-changelog skill --from 2026-08-01 --to 2026-08-31 --author "Your name"
+copilot-changelog skill --help</code></pre></div>
+        <p>The skill files are included in npm and portable releases, with their original <strong>Personal use</strong> license notice in <code>.github/skills/github-copilot-changelog-deck/SKILL.md</code>. This notice is separate from the CLI's license; check the applicable terms before redistribution.</p>
+        <h3>Sources, recovery and review</h3>
+        <p>The default period is the last 30 days including today. Skill mode collects GitHub Copilot changelog articles, excluding weekly-release roundups. <code>--feed</code> may select an RSS/Atom URL or local file, but article links must point to <code>https://github.blog/changelog/</code> and each original Release, Improvement or Retired type must be verifiable from the feed or article. Processing is sequential; <code>--limit</code>, <code>--model</code>, <code>--request-timeout</code> and the soft <code>--max-credits</code> cap are available. Other briefing options, including profiles, websites and <code>--no-ai</code>, are not supported in skill mode.</p>
+        <p>A failed or interrupted run retains its checkpoint and work files. Repeat the command with the same source, date range and model plus <code>--resume</code> to reuse accepted records; <code>--restart</code> discards that checkpoint. Budget pauses exit with code 2, and missing usage data stops a budgeted run rather than assuming it is free. Existing decks are never overwritten.</p>
+        <p>The command uses article images where possible, rejects generic changelog banners, and falls back to section icons. Static checks run on the generated deck; repairable article-level content errors are retried up to three rounds, and the command refuses to publish a deck with QA errors. The output directory contains the deck and a uniquely named <code>*.qa-*</code> folder with <code>ui_report.md</code> and <code>ui_report.json</code>. With <code>--preview</code>, <code>previews/</code> contains a PNG for every slide, including hidden slides. These approximations can differ from or omit content shown in PowerPoint and do not verify visual layout. Review warnings and source facts and inspect the deck before sharing.</p>
       </section>
 
       <section id="sources" class="doc-section" aria-labelledby="sources-title">
@@ -373,6 +389,23 @@ copilot-changelog --from 2026-08-01 --to 2026-08-31 --resume</code></pre></div>
             </tbody></table>
           </div>
         </details>
+        <div class="table-scroll" role="region" aria-label="Skill deck options" tabindex="0">
+          <table><caption>Italian skill deck options: <code>copilot-changelog skill</code></caption><thead><tr><th scope="col">Option</th><th scope="col">Behavior</th><th scope="col">Default</th></tr></thead><tbody>
+            <tr><th scope="row"><code>-f, --from &lt;date&gt;</code></th><td>First publication date, inclusive.</td><td>29 days ago</td></tr>
+            <tr><th scope="row"><code>-t, --to &lt;date&gt;</code></th><td>Last publication date, inclusive.</td><td>Today</td></tr>
+            <tr><th scope="row"><code>-o, --output &lt;directory&gt;</code></th><td>Deck, QA, checkpoint and temporary work directory.</td><td><code>output</code></td></tr>
+            <tr><th scope="row"><code>-m, --model &lt;model&gt;</code></th><td>Copilot model.</td><td><code>auto</code></td></tr>
+            <tr><th scope="row"><code>-l, --limit &lt;count&gt;</code></th><td>Maximum newest articles after weekly roundups are excluded.</td><td>Unlimited</td></tr>
+            <tr><th scope="row"><code>-F, --feed &lt;url-or-file&gt;</code></th><td>Replacement changelog RSS/Atom feed URL or local file.</td><td>Copilot changelog archive</td></tr>
+            <tr><th scope="row"><code>-T, --request-timeout &lt;seconds&gt;</code></th><td>Deadline for each Copilot request or initialization.</td><td><code>180</code></td></tr>
+            <tr><th scope="row"><code>-b, --max-credits &lt;credits&gt;</code></th><td>Soft cumulative credit cap, including resumed attempts.</td><td>No cap</td></tr>
+            <tr><th scope="row"><code>-P, --python &lt;executable&gt;</code></th><td>Python executable with the required modules.</td><td>Discover automatically</td></tr>
+            <tr><th scope="row"><code>-X, --preview</code></th><td>Generate approximate PNGs with render-pptx.</td><td>Disabled</td></tr>
+            <tr><th scope="row"><code>-J, --author &lt;text&gt;</code></th><td>Author line printed on the cover.</td><td><code>Copilot Changelog CLI</code></td></tr>
+            <tr><th scope="row"><code>-R, --resume</code></th><td>Resume a compatible unfinished skill checkpoint.</td><td>Disabled</td></tr>
+            <tr><th scope="row"><code>-S, --restart</code></th><td>Discard the unfinished skill checkpoint.</td><td>Disabled</td></tr>
+          </tbody></table>
+        </div>
         <div class="table-scroll" role="region" aria-label="CLI management commands" tabindex="0">
           <table><caption>Management commands</caption><thead><tr><th scope="col">Command</th><th scope="col">Behavior</th></tr></thead><tbody>
             <tr><th scope="row"><code>copilot-changelog version</code></th><td>Print the installed CLI version.</td></tr>

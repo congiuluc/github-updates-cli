@@ -15,6 +15,10 @@
     "copilot-changelog": "./dist/cli.js"
   },
   "files": [
+    ".github/skills/github-copilot-changelog-deck/SKILL.md",
+    ".github/skills/github-copilot-changelog-deck/assets",
+    ".github/skills/github-copilot-changelog-deck/references",
+    ".github/skills/github-copilot-changelog-deck/scripts/*.py",
     "assets",
     "dist",
     "README.md"

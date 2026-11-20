@@ -6,6 +6,7 @@ dist/
 output/
 coverage/
 artifacts/
+deck/
 *.tgz
 
 # Local environments and secrets
@@ -14,6 +15,8 @@ artifacts/
 !.env.example
 .venv/
 .venv-*/
+__pycache__/
+*.py[cod]
 
 # Logs, traces, and runtime files
 *.log

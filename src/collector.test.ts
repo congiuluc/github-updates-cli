@@ -42,6 +42,38 @@ const fixture = `<?xml version="1.0"?><rss><channel>
 </channel></rss>`;
 
 describe("parseChangelogFeed", () => {
+  it("preserves explicit changelog types from RSS and Atom category metadata", () => {
+    const rss = `<rss><channel><item><title>Update</title>
+      <link>https://github.blog/changelog/2026-08-15-update</link><pubDate>2026-08-15</pubDate>
+      <category>copilot</category><category>Improvement</category><description>Content.</description>
+      </item></channel></rss>`;
+    const atom = `<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>Retirement</title>
+      <link href="https://github.blog/changelog/2026-08-15-retirement"/><updated>2026-08-15</updated>
+      <category term="Retired"/><summary>Content.</summary></entry></feed>`;
+    expect(parseChangelogFeed(rss, august)[0].changelogType).toBe("Improvement");
+    expect(parseChangelogFeed(atom, august)[0].changelogType).toBe("Retired");
+    expect(parseChangelogFeed(fixture, august)[0].changelogType).toBeUndefined();
+  });
+
+  it("preserves archive type labels when preparing the full article", async () => {
+    const directory = await fixtureDirectory();
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      if (String(input).includes("opened-months")) return new Response(`<changelog-month data-loaded="true"><article>
+        <time datetime="2026-08-15"></time><span class="Tag Tag--type-alt">Release</span>
+        <a class="ChangelogItem-title" href="/changelog/2026-08-15-update">Update</a>
+        </article></changelog-month>`);
+      return new Response("<article><p>Readable source content.</p></article>");
+    });
+    try {
+      const options = { cacheDirectory: join(directory, "cache"), fetchImpl };
+      const selection = await discoverChangelog(august, undefined, options);
+      expect(selection.selected[0].changelogType).toBe("Release");
+      expect((await prepareChangelog(selection, options))[0].changelogType).toBe("Release");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("extracts full content and filters the selected period", () => {
     const posts = parseChangelogFeed(fixture, {
       from: new Date("2026-08-01T00:00:00Z"),

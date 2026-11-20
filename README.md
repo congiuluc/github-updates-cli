@@ -3,7 +3,6 @@
 </p>
 
 <h1 align="center">Copilot Changelog CLI</h1>
-
 <p align="center">
   <strong>The changelog. Ready to present.</strong><br>
   Turn GitHub Copilot updates into AI-edited PowerPoint briefings<br>
@@ -66,6 +65,8 @@ copilot-changelog --include-ai-ml
 ```
 
 Examples use long options for clarity; **case-sensitive short aliases** remain available in the [complete option reference](https://congiuluc.github.io/github-updates-cli/#cli-reference).
+
+**Italian skill deck (opt-in):** Install Python 3.9+ and run `python -m pip install python-pptx` (which also installs Pillow), then `copilot-changelog skill --from 2026-08-01 --to 2026-08-31`. For optional PNG previews, install `render-pptx==0.2.0` and add `--preview`; these approximate images can differ from or omit content in PowerPoint. QA checks are static only. The bundled skill retains its **Personal use** license notice; Python is not bundled. See the [skill guide](https://congiuluc.github.io/github-updates-cli/#skill-mode) for prerequisites, six-section output, resume and QA details.
 
 `--rss` accepts RSS and Atom, including repeated occurrences. `--include` / `--exclude` filter titles before the global `--limit`; otherwise all in-range articles are eligible. `--full-articles` fetches linked pages instead of embedded feed text. `--feed` replaces the base changelog; `--rss` and `--include-ai-ml` can still add to it.
 

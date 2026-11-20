@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { access, chmod, copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { expect, test } from "vitest";
 
 const root = resolve(import.meta.dirname, "..");
@@ -45,6 +45,33 @@ test("release package and lockfile declare the same version", async () => {
   expect(lock.version).toBe(version);
   expect(lock.packages[""].version).toBe(version);
 });
+
+test("npm and portable packaging include the redistributable skill without Python bytecode", async () => {
+  const npm = process.env.npm_execpath?.endsWith("npm-cli.js")
+    ? process.env.npm_execpath : join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
+  const args = ["pack", "--dry-run", "--json", "--ignore-scripts"];
+  const packed = spawnSync(process.platform === "win32" ? process.execPath : "npm",
+    process.platform === "win32" ? [npm, ...args] : args,
+    { cwd: root, encoding: "utf8", timeout: 60_000 });
+  expect(packed.status, packed.stderr).toBe(0);
+  const files = (JSON.parse(packed.stdout)[0].files as Array<{ path: string }>).map((file) => file.path);
+  const prefix = ".github/skills/github-copilot-changelog-deck/";
+  for (const file of ["SKILL.md", "references/news-record-format.md", "scripts/build_deck.py",
+    "scripts/check_deck.py", "scripts/pick_images.py", "scripts/banner.py", "scripts/split_news.py",
+    "assets/cover.jpg", "assets/closer.jpg", ...["modelli", "release", "improvement", "governance", "ide", "retired"]
+      .map((section) => `assets/ic-${section}.png`)]) {
+    expect(files).toContain(`${prefix}${file}`);
+  }
+  expect(files.filter((file) => file.startsWith(prefix))).not.toEqual(
+    expect.arrayContaining([expect.stringMatching(/__pycache__|\.pyc$/)]),
+  );
+  expect(await read(`${prefix}SKILL.md`)).toContain("license: Personal use");
+  const [unix, windows] = await Promise.all([read("packaging/build-unix.sh"), read("packaging/build-portable.ps1")]);
+  expect(unix).toContain('cp "$SKILL_SOURCE/scripts/"*.py "$SKILL_TARGET/scripts/"');
+  expect(unix).toContain('cp -R "$SKILL_SOURCE/assets" "$SKILL_SOURCE/references" "$SKILL_TARGET/"');
+  expect(windows).toContain('Get-ChildItem -LiteralPath (Join-Path $skillSource "scripts") -Filter "*.py" -File');
+  expect(windows).toContain('@("SKILL.md", "assets", "references")');
+}, 75_000);
 
 test("Copilot icon includes transparent 32-bit PNG frames for standard Windows icon sizes", async () => {
   const icon = await readFile(join(root, "assets", "copilot.ico"));

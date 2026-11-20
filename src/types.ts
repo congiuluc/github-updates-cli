@@ -45,10 +45,13 @@ export interface SourceLink {
   url: string;
 }
 
+export type ChangelogType = "Release" | "Improvement" | "Retired";
+
 export interface ChangelogPost {
   title: string;
   url: string;
   publishedAt: string;
+  changelogType?: ChangelogType;
   author?: string;
   plainText: string;
   html: string;
