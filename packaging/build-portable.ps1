@@ -50,7 +50,8 @@ try {
     $nodeUri = "https://nodejs.org/dist/v$NodeVersion/node-v$NodeVersion-win-x64.zip"
     Invoke-WebRequest -UseBasicParsing -Uri $nodeUri -OutFile $nodeArchive
     $nodeExtract = Join-Path $temp "node"
-    Expand-Archive $nodeArchive -DestinationPath $nodeExtract
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($nodeArchive, $nodeExtract)
     $nodeRoot = Get-ChildItem $nodeExtract -Directory | Select-Object -First 1
     $runtime = Join-Path $staging "runtime"
     New-Item -ItemType Directory -Force -Path $runtime | Out-Null

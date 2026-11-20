@@ -258,7 +258,8 @@ try {
   Start-Sleep -Seconds 2
   New-Item -ItemType Directory -Path $lock -ErrorAction Stop | Out-Null
   $ownsLock = $true
-  Expand-Archive -LiteralPath ${quote(archivePath)} -DestinationPath $stage
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  [System.IO.Compression.ZipFile]::ExtractToDirectory(${quote(archivePath)}, $stage)
   foreach ($entry in $entries) {
     if (-not (Test-Path -LiteralPath (Join-Path $stage $entry))) { throw "Missing update entry: $entry" }
   }
